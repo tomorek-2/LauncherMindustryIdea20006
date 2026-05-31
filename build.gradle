@@ -4,7 +4,7 @@ plugins {
 
 version = '0.0.1'
 
-def mindustryVersion = 'v146'
+def mindustryVersion = 'master-SNAPSHOT'
 
 sourceSets {
     named("main") {
