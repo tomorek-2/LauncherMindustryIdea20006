@@ -5,7 +5,7 @@ plugins {
 
 version = '0.0.1'
 
-def mindustryVersion = 'master-SNAPSHOT'
+//def mindustryVersion = 'master-SNAPSHOT'
 
 sourceSets {
     named("main") {
@@ -15,19 +15,10 @@ sourceSets {
     }
 }
 
-repositories {
-    mavenCentral()
-    maven { url "https://www.jitpack.io" }
-    flatDir {
-        dirs "$rootDir/../Arc/arc-core/build/libs", "$rootDir/../Arc/backends/backend-sdl/build/libs", "$rootDir/../Arc/natives/natives-desktop/build/libs"
-    }
-}
 
 dependencies {
-    implementation "arc-core:arc-core:1.0"
-    implementation "backend-sdl:backend-sdl:1.0"
-    implementation "natives-desktop:natives-desktop:1.0"
-    implementation "com.github.Anuken.Mindustry:core:$mindustryVersion"
+    implementation 'com.github.Anuken.Arc:arc-core:v158.1'
+        implementation 'com.github.Anuken.Arc:backend-sdl:v158.1'
 }
 
 application {
