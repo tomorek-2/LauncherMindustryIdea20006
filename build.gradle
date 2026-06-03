@@ -25,3 +25,16 @@ dependencies {
 application {
     mainClass = 'singlaunch.SingularityLauncher'
 }
+
+jar {
+    archiveFileName = 'SingularityLauncher.jar'
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes(
+            'Main-Class': 'singlaunch.SingularityLauncher'
+        )
+    }
+}
