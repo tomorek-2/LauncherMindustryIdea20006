@@ -20,7 +20,7 @@ import arc.scene.ui.*;
 import arc.scene.ui.layout.Table;
 import arc.util.Log;
 import arc.util.viewport.ScreenViewport;
-
+import arc.Core.*;
 import javax.imageio.ImageIO;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
@@ -278,6 +278,7 @@ scanVersions();
 
         // Header
         main.add(new Label("SINGULARITY", titleLabelStyle)).padTop(30).padBottom(5).row();
+
         main.add(new Label("Launcher", regularLabelStyle)).padBottom(20).row();
 
         // Versions list
@@ -338,23 +339,26 @@ scanVersions();
     }
 
     private void launchMindustry(String jarPath) {
-        Log.info("Starting: " + jarPath);
-        try {
-            new ProcessBuilder("java", "-jar", jarPath)
-                    .inheritIO()
-                    .start();
-            Core.app.exit();
-        } catch (IOException e) {
-            Log.err("Start failed: ", e);
+        while (true) {
+            Log.info("Starting: " + jarPath);
+            try {
+                new ProcessBuilder("java", "-jar", jarPath)
+                        .inheritIO()
+                        .start();
+                Core.app.exit();
+            } catch (IOException e) {
+                Log.err("Start failed: ", e);
+            }
         }
     }
+    public static void main(String[] args){
+            SdlConfig config = new SdlConfig();
+            config.title = "Singularity Launcher";
+            config.width = 600;
+            config.height = 550;
 
-    public static void main(String[] args) {
-        SdlConfig config = new SdlConfig();
-        config.title = "Singularity Launcher";
-        config.width = 600;
-        config.height = 550;
+            new SdlApplication(new SingularityLauncher(), config);
 
-        new SdlApplication(new SingularityLauncher(), config);
     }
+
 }
