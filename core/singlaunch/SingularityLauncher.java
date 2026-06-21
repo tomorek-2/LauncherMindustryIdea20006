@@ -347,7 +347,7 @@ public class SingularityLauncher extends ApplicationCore {
                 new ProcessBuilder("java", "-jar", jarPath)
                         .inheritIO()
                         .start();
-                Core.app.exit();
+               Core.app.exit();
             } catch (IOException e) {
                 Log.err("Start failed: ", e);
             }
