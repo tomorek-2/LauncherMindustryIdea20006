@@ -35,7 +35,7 @@ android {
                         '**/ResourceLoader.java'
                 )
             }
-            assets.srcDirs = ['../../assets']
+            assets.srcDirs = ['../assets']
         }
     }
 
@@ -43,6 +43,10 @@ android {
         release {
             minifyEnabled false
         }
+    }
+
+    lint {
+        lintConfig file('lint.xml')
     }
 }
 

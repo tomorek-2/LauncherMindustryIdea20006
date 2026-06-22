@@ -11,6 +11,8 @@ import android.webkit.WebViewClient;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 
+import singlaunch.HttpUtil;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,13 +47,13 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        try (InputStream in = getAssets().open("web/index.html")) {
-            String html = new String(in.readAllBytes());
+        String html = loadWebHtml();
+        if (html != null) {
             webView.loadDataWithBaseURL("file:///android_asset/web/", html, "text/html", "UTF-8", null);
-        } catch (IOException e) {
+        } else {
             webView.loadDataWithBaseURL(null,
                     "<html><body style='background:#1a1a1a;color:#ffd379;padding:24px'>"
-                    + "Ошибка загрузки UI: " + e.getMessage() + "</body></html>",
+                    + "Ошибка загрузки UI: web/index.html</body></html>",
                     "text/html", "UTF-8", null);
         }
     }
@@ -63,6 +65,16 @@ public class MainActivity extends AppCompatActivity {
         } else {
             super.onBackPressed();
         }
+    }
+
+    private String loadWebHtml() {
+        String[] paths = {"web/index.html", "index.html"};
+        for (String path : paths) {
+            try (InputStream in = getAssets().open(path)) {
+                return new String(HttpUtil.readBytes(in));
+            } catch (IOException ignored) {}
+        }
+        return null;
     }
 
     void openApkInstall(File apk) {

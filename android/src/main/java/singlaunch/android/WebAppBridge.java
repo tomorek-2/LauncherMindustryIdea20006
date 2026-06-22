@@ -55,6 +55,7 @@ public class WebAppBridge {
     }
 
     void onPageReady() {
+        runJs("document.body.classList.add('android','mobile')");
         runJs("applyBootstrap(" + getBootstrapDataFast() + ")");
         versionDownloader.refreshAsync(() -> runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")"));
     }
@@ -178,8 +179,12 @@ public class WebAppBridge {
     public void downloadVersion(String id) {
         GameVersion version = service.findVersion(id);
         if (version == null) return;
+        LauncherSettings settings = configManager.getSettings();
+        settings.selectedVersionId = id;
+        configManager.save();
         new Thread(() -> {
             try {
+                runJs("setDownloadProgress(0, 'Загрузка...')");
                 if (version.apkUrl != null && !version.apkUrl.isBlank()) {
                     versionDownloader.ensureApkDownloaded(version, p ->
                             runJs("setDownloadProgress(" + p + ", 'Загрузка...')"));
@@ -189,8 +194,8 @@ public class WebAppBridge {
                 }
                 runJs("setDownloadProgress(-1, '')");
                 versionDownloader.invalidateCache();
-                runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")");
-                toast("Версия загружена");
+                String versionsJson = GSON.toJson(versionDownloader.listAvailable());
+                runJs("onVersionDownloaded('" + escapeJs(id) + "'," + versionsJson + ")");
             } catch (Exception e) {
                 runJs("setDownloadProgress(-1, '')");
                 toast("Ошибка загрузки");

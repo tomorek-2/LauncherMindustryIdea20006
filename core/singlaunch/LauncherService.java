@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -84,7 +85,7 @@ public class LauncherService {
         if (!Files.isDirectory(modsDir)) return keys;
         try (var stream = Files.list(modsDir)) {
             stream.filter(path -> {
-                String name = path.getFileName().toString().toLowerCase();
+                String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
                 return name.endsWith(".zip") || name.endsWith(".jar");
             }).forEach(path -> keys.add(path.getFileName().toString().replaceFirst("(?i)\\.(zip|jar)$", "")));
         } catch (Exception ignored) {}

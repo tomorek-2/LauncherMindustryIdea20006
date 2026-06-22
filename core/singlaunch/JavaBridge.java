@@ -192,6 +192,10 @@ public class JavaBridge {
         GameVersion version = findVersion(id);
         if (version == null) return;
 
+        LauncherSettings settings = configManager.getSettings();
+        settings.selectedVersionId = id;
+        configManager.save();
+
         Task<Void> task = new Task<>() {
             @Override
             protected Void call() throws Exception {
@@ -204,8 +208,7 @@ public class JavaBridge {
             protected void succeeded() {
                 runJs("setDownloadProgress(-1, '')");
                 versionDownloader.invalidateCache();
-                runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")");
-                runJs("showToast('Версия загружена')");
+                runJs("onVersionDownloaded(" + jsQuote(id) + "," + GSON.toJson(versionDownloader.listAvailable()) + ")");
             }
 
             @Override

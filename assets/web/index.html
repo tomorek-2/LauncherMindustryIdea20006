@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Singularity Launcher</title>
 <style>
   :root {
@@ -109,6 +110,21 @@
   }
   .version-item.selected { border-color: var(--accent); color: var(--accent); }
   .version-item .tag { font-size: 10px; color: var(--text-dim); }
+  .version-item .tag.cached { color: var(--accent); }
+  .version-dl {
+    border: 1px solid var(--accent);
+    background: var(--bg);
+    color: var(--accent);
+    padding: 4px 10px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    flex-shrink: 0;
+    min-width: 84px;
+    min-height: 28px;
+  }
+  .version-dl:active { background: var(--bg-3); }
+  .version-name { flex: 1; min-width: 0; }
   .menu {
     padding: 20px 16px;
     display: flex;
@@ -281,6 +297,92 @@
     pointer-events: none;
   }
   .toast.show { transform: translateX(-50%) translateY(0); }
+
+  body.mobile .launcher,
+  body.android .launcher {
+    width: 100%;
+    height: 100dvh;
+    max-width: none;
+    margin: 0;
+    border-width: 0;
+    border-top: 2px solid var(--accent);
+  }
+  body.mobile,
+  body.android {
+    overflow: auto;
+    background-size: 32px 32px, 32px 32px, auto;
+  }
+  body.mobile header,
+  body.android header {
+    -webkit-app-region: none;
+    padding: 12px 14px;
+  }
+  body.mobile .logo,
+  body.android .logo { font-size: 14px; }
+  body.mobile footer,
+  body.android footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 14px;
+  }
+  body.mobile .overlay .panel,
+  body.android .overlay .panel {
+    width: 100%;
+    max-width: none;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  body.mobile .row,
+  body.android .row { grid-template-columns: 1fr; }
+
+  @media (orientation: portrait) {
+    body.mobile main,
+    body.android main {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      overflow: auto;
+    }
+    body.mobile .preview,
+    body.android .preview {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      padding: 14px;
+    }
+    body.mobile .menu,
+    body.android .menu {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 14px;
+    }
+    body.mobile .menu .btn.primary,
+    body.android .menu .btn.primary { grid-column: 1 / -1; }
+    body.mobile .version-list,
+    body.android .version-list { max-height: 140px; }
+  }
+
+  @media (orientation: landscape) {
+    body.mobile main,
+    body.android main {
+      grid-template-columns: 1fr minmax(220px, 34vw);
+      overflow: hidden;
+    }
+    body.mobile .menu,
+    body.android .menu {
+      padding: 12px 10px;
+      gap: 6px;
+      overflow: auto;
+    }
+    body.mobile .menu .btn,
+    body.android .menu .btn { padding: 10px 8px; font-size: 11px; }
+    body.mobile .preview,
+    body.android .preview { padding: 12px; }
+    body.mobile .card,
+    body.android .card { padding: 10px; }
+    body.mobile .version-list,
+    body.android .version-list { max-height: 120px; }
+  }
 </style>
 </head>
 <body>
@@ -459,6 +561,7 @@
       modsState.instanceId = id;
       const inst = (state.instances || []).find(i => i.id === id);
       document.getElementById('modsInstanceTrigger').textContent = inst ? inst.name : id;
+      if (modsState.mods && modsState.mods.length) renderModList();
       javaApp.loadMods(document.getElementById('modsSearch').value || '', id);
     }
 
@@ -467,12 +570,18 @@
       state.instances = data.instances || state.instances;
       state.settings = data.settings || state.settings;
       renderInstancesOnly();
+      if (document.getElementById('modsOverlay').classList.contains('open') && modsState.mods && modsState.mods.length) {
+        renderModList();
+      }
     }
 
     function applyVersions(versions) {
       if (typeof versions === 'string') versions = JSON.parse(versions);
       state.versions = versions || [];
-      renderAll();
+      renderVersionListOnly();
+      if (document.getElementById('modsOverlay').classList.contains('open') && modsState.mods && modsState.mods.length) {
+        renderModList();
+      }
     }
 
     function applyBootstrap(data) {
@@ -529,12 +638,18 @@
       versions.forEach(v => {
         const li = document.createElement('li');
         li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
-        li.innerHTML = '<span>' + v.name + '</span><span class="tag">' + (v.cached ? 'кэш' : 'скачать') + '</span>';
-        li.onclick = () => {
-          javaApp.selectVersion(v.id);
-          if (!v.cached) javaApp.downloadVersion(v.id);
-          else renderAll();
-        };
+        if (v.cached) {
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><span class="tag cached">кэш</span>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+        } else {
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><button type="button" class="version-dl">СКАЧАТЬ</button>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+          li.querySelector('.version-dl').onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            downloadVersionOnly(v.id);
+          };
+        }
         versionList.appendChild(li);
       });
 
@@ -576,39 +691,155 @@
 
     function onModsLoaded(data) {
       if (typeof data === 'string') data = JSON.parse(data);
-      modsState = data;
+      modsState.mods = data.mods || [];
+      modsState.instanceId = data.instanceId || modsState.instanceId;
+      modsState.instanceName = data.instanceName;
+      modsState.installedKeys = (data.mods || []).filter(m => m.installed).map(m => (m.repo || '').replace('/', ''));
+      renderModList();
+    }
+
+    function parseGameVersion(versionId, versionName) {
+      let source = (versionId || '') + ' ' + (versionName || '');
+      source = source.replace(/mindustry/gi, '');
+      const re = /v?(\d+)(?:\.(\d+))?/g;
+      let build = 0, revision = 0, best = -1, m;
+      while ((m = re.exec(source)) !== null) {
+        const candidateBuild = parseInt(m[1], 10);
+        const candidateRevision = m[2] ? parseInt(m[2], 10) : 0;
+        if (candidateBuild > best) {
+          best = candidateBuild;
+          build = candidateBuild;
+          revision = candidateRevision;
+        }
+      }
+      return [build, revision];
+    }
+
+    function formatGameVersion(build, revision) {
+      if (!build || build <= 0) return 'неизвестно';
+      return revision ? build + '.' + revision : String(build);
+    }
+
+    function modIsCompatible(minGameVersion, build, revision) {
+      if (!minGameVersion) return true;
+      if (!build || build <= 0) return true;
+      const req = String(minGameVersion).trim();
+      const dot = req.indexOf('.');
+      if (dot >= 0) {
+        const major = parseInt(req.slice(0, dot), 10) || 0;
+        const minor = parseInt(req.slice(dot + 1), 10) || 0;
+        return build > major || (build === major && revision >= minor);
+      }
+      return build >= (parseInt(req, 10) || 0);
+    }
+
+    function resolveModsInstance() {
+      const settings = state.settings || {};
+      const instances = state.instances || [];
+      const selectedId = modsState.instanceId || settings.selectedInstanceId;
+      return instances.find(i => i.id === selectedId) || instances[0] || null;
+    }
+
+    function instanceGameVersion(instance) {
+      if (!instance) return [0, 0];
+      const versionId = (instance.versionId && instance.versionId.trim())
+        ? instance.versionId
+        : (state.settings || {}).selectedVersionId;
+      const v = (state.versions || []).find(x => x.id === versionId);
+      return parseGameVersion(v ? v.id : '', v ? v.name : '');
+    }
+
+    function renderModList() {
+      const instance = resolveModsInstance();
+      const [build, revision] = instanceGameVersion(instance);
+      const versionLabel = formatGameVersion(build, revision);
+      const mods = modsState.mods || [];
+
       document.getElementById('modsSummary').textContent =
-        'Инстанс: ' + data.instanceName + ' · Версия: ' + data.gameVersionLabel +
-        ' · Показано модов: ' + (data.mods ? data.mods.length : 0);
-      document.getElementById('modsGameVersion').value = data.gameVersionLabel || '—';
+        'Инстанс: ' + (instance ? instance.name : '—') + ' · Версия: ' + versionLabel +
+        ' · Показано модов: ' + mods.length;
+      document.getElementById('modsGameVersion').value = versionLabel;
       renderModsInstanceSelect();
 
       const list = document.getElementById('modList');
       list.innerHTML = '';
-      (data.mods || []).forEach(mod => {
+      mods.forEach(mod => {
+        const compatible = modIsCompatible(mod.minGameVersion, build, revision);
         const item = document.createElement('div');
         item.className = 'mod-item' +
           (mod.installed ? ' installed' : '') +
-          (!mod.compatible ? ' incompatible' : '');
+          (!compatible ? ' incompatible' : '');
         const req = mod.minGameVersion ? 'Требуется ' + mod.minGameVersion : 'Без ограничения';
         item.innerHTML =
           '<div>' +
             '<div class="title">' + escapeHtml(mod.name || mod.repo) + '</div>' +
             '<div class="meta">' + escapeHtml(mod.author || '') + ' · ★ ' + (mod.stars || 0) + '<br>' +
             escapeHtml((mod.description || '').slice(0, 140)) + '</div>' +
-            '<div class="badge ' + (mod.compatible ? '' : 'bad') + '">' +
-              (mod.compatible ? 'Совместим' : 'Несовместим') + ' · ' + req +
+            '<div class="badge ' + (compatible ? '' : 'bad') + '">' +
+              (compatible ? 'Совместим' : 'Несовместим') + ' · ' + req +
               (mod.installed ? ' · Установлен' : '') +
             '</div>' +
           '</div>' +
           '<div class="mod-actions">' +
-            '<button class="btn-sm" ' + (mod.compatible ? '' : 'disabled') +
+            '<button class="btn-sm" ' + (compatible ? '' : 'disabled') +
               ' onclick="installMod(\'' + escapeAttr(mod.repo) + '\',' + (mod.hasJava ? 'true' : 'false') + ')">' +
               (mod.installed ? 'ПЕРЕУСТАНОВИТЬ' : 'УСТАНОВИТЬ') +
             '</button>' +
           '</div>';
         list.appendChild(item);
       });
+    }
+
+    function selectVersionOnly(id) {
+      state.settings.selectedVersionId = id;
+      javaApp.selectVersion(id);
+      renderVersionListOnly();
+    }
+
+    function downloadVersionOnly(id) {
+      javaApp.downloadVersion(id);
+    }
+
+    function onVersionDownloaded(id, versions) {
+      if (typeof versions === 'string') versions = JSON.parse(versions);
+      state.versions = versions || state.versions;
+      state.settings.selectedVersionId = id;
+      renderVersionListOnly();
+      showToast('Версия загружена');
+    }
+
+    function renderVersionListOnly() {
+      const settings = state.settings || {};
+      const versions = state.versions || [];
+      const selectedVersion = versions.find(v => v.id === settings.selectedVersionId) || versions[0];
+      const versionList = document.getElementById('versionList');
+      if (!versionList) return;
+      versionList.innerHTML = '';
+      versions.forEach(v => {
+        const li = document.createElement('li');
+        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
+        if (v.cached) {
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><span class="tag cached">кэш</span>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+        } else {
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><button type="button" class="version-dl">СКАЧАТЬ</button>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+          li.querySelector('.version-dl').onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            downloadVersionOnly(v.id);
+          };
+        }
+        versionList.appendChild(li);
+      });
+      const selectedInstance = (state.instances || []).find(i => i.id === settings.selectedInstanceId) || (state.instances || [])[0];
+      const selectedVersionName = selectedVersion ? selectedVersion.name : '—';
+      document.getElementById('headerInfo').textContent =
+        (selectedInstance ? selectedInstance.name : '—') + ' · ' + selectedVersionName;
+      document.getElementById('instanceSummary').innerHTML =
+        '<b>' + (selectedInstance ? selectedInstance.name : '—') + '</b><br>' +
+        'Версия: ' + selectedVersionName + '<br>' +
+        'RAM: ' + settings.minMemoryMb + '–' + settings.maxMemoryMb + ' МБ';
     }
 
     function installMod(repo, hasJava) {
@@ -658,7 +889,6 @@
 
     function deleteInstance(id) {
       javaApp.deleteInstance(id);
-      applyBootstrap(javaApp.getBootstrapData());
     }
 
     function openPanel(name) {
@@ -675,8 +905,11 @@
     }
 
     function onSettingsSaved() { showToast('Настройки сохранены'); }
-    function onInstanceSelected(name) { showToast('Инстанс: ' + name); renderAll(); }
-    function onVersionSelected() { applyBootstrap(javaApp.getBootstrapData()); }
+    function onInstanceSelected(name) { showToast('Инстанс: ' + name); }
+    function onVersionSelected(id) {
+      if (id) state.settings.selectedVersionId = id;
+      renderVersionListOnly();
+    }
 
     function setStatus(text) {
       document.getElementById('statusText').textContent = text;

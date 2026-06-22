@@ -5,8 +5,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.function.DoubleConsumer;
@@ -22,7 +24,7 @@ public final class HttpUtil {
             throw new IOException("HTTP " + code);
         }
         try (InputStream in = connection.getInputStream()) {
-            return new String(in.readAllBytes());
+            return new String(readBytes(in), StandardCharsets.UTF_8);
         } finally {
             connection.disconnect();
         }
@@ -37,7 +39,7 @@ public final class HttpUtil {
         }
         String body;
         try (InputStream in = connection.getInputStream()) {
-            body = new String(in.readAllBytes());
+            body = new String(readBytes(in), StandardCharsets.UTF_8);
         }
         String link = connection.getHeaderField("Link");
         connection.disconnect();
@@ -78,6 +80,16 @@ public final class HttpUtil {
         }
         Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         if (progress != null) progress.accept(1.0);
+    }
+
+    public static byte[] readBytes(InputStream in) throws IOException {
+        byte[] buffer = new byte[8192];
+        int read;
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        while ((read = in.read(buffer)) != -1) {
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
     }
 
     private static HttpURLConnection open(String url, Map<String, String> headers) throws IOException {

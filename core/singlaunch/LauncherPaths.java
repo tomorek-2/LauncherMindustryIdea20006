@@ -2,12 +2,13 @@ package singlaunch;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 public final class LauncherPaths {
-    private static final Path ROOT = Path.of(
+    private static final Path ROOT = Paths.get(
             System.getProperty("singularity.launcher.dir",
                     System.getenv().getOrDefault("SINGULARITY_LAUNCHER_DIR",
-                            Path.of(System.getProperty("user.home"), ".singularity-launcher").toString())));
+                            Paths.get(System.getProperty("user.home"), ".singularity-launcher").toString())));
 
     private LauncherPaths() {}
 
@@ -28,7 +29,7 @@ public final class LauncherPaths {
     }
 
     public static Path legacyVersionsDir() {
-        return Path.of("versions");
+        return Paths.get("versions");
     }
 
     public static void ensureDirs() {

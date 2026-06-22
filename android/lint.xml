@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <issue id="NewApi">
+        <ignore path="**/LauncherEntry.java" />
+        <ignore path="**/ResourceLoader.java" />
+        <ignore path="**/OverlayDropdown.java" />
+        <ignore path="**/SingularityLauncher.java" />
+        <ignore path="**/JavaBridge.java" />
+        <ignore path="**/GameLauncher.java" />
+    </issue>
+</lint>
