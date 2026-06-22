@@ -49,8 +49,10 @@ public class MainActivity extends AppCompatActivity {
             String html = new String(in.readAllBytes());
             webView.loadDataWithBaseURL("file:///android_asset/web/", html, "text/html", "UTF-8", null);
         } catch (IOException e) {
-            webView.loadData("<html><body style='background:#1a1a1a;color:#ffd379;padding:24px'>"
-                    + "Ошибка загрузки UI: " + e.getMessage() + "</body></html>", "text/html", "UTF-8", null);
+            webView.loadDataWithBaseURL(null,
+                    "<html><body style='background:#1a1a1a;color:#ffd379;padding:24px'>"
+                    + "Ошибка загрузки UI: " + e.getMessage() + "</body></html>",
+                    "text/html", "UTF-8", null);
         }
     }
 

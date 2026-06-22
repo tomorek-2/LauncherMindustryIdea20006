@@ -22,7 +22,7 @@ android {
     sourceSets {
         main {
             java {
-                srcDirs = ['src/main/java', '../../core/singlaunch']
+                srcDirs = ['src/main/java', '../core/singlaunch']
                 exclude(
                         '**/SingularityLauncher.java',
                         '**/LauncherEntry.java',
@@ -44,6 +44,11 @@ android {
             minifyEnabled false
         }
     }
+}
+
+configurations.all {
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
 }
 
 dependencies {

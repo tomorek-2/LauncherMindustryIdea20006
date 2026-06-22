@@ -96,9 +96,9 @@ public class WebAppBridge {
 
     @JavascriptInterface
     public void createInstance(String name, String versionId) {
+        String instanceName = (name == null || name.isBlank()) ? "Инстанс" : name.trim();
         new Thread(() -> {
-            if (name == null || name.isBlank()) name = "Инстанс";
-            InstanceInfo created = instanceManager.create(name.trim(), versionId);
+            InstanceInfo created = instanceManager.create(instanceName, versionId);
             LauncherSettings settings = configManager.getSettings();
             settings.selectedInstanceId = created.id;
             configManager.save();
