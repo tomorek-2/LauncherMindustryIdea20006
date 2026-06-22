@@ -15,7 +15,12 @@
     --border: #3a3a3a;
     --danger: #ff7b7b;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+  *::-webkit-scrollbar { width: 5px; height: 5px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: #555; }
+  *::-webkit-scrollbar-corner { background: transparent; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -172,7 +177,7 @@
   }
   .panel-body { padding: 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
   .field label { display: block; font-size: 11px; color: var(--text-dim); margin-bottom: 4px; letter-spacing: 0.08em; }
-  .field input[type="text"], .field input[type="number"], .field select {
+  .field input[type="text"], .field input[type="number"] {
     width: 100%;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -180,6 +185,40 @@
     padding: 8px 10px;
     font-size: 13px;
   }
+  .custom-select { position: relative; }
+  .custom-select-trigger {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .custom-select-menu {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    max-height: 200px;
+    overflow: auto;
+    background: var(--bg-2);
+    border: 1px solid var(--accent);
+    z-index: 60;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+  .custom-select.open .custom-select-menu { display: block; }
+  .custom-select-option {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .custom-select-option:hover { background: var(--bg-3); color: var(--text); }
+  .custom-select-option.selected { color: var(--accent); background: var(--bg-3); }
   .field input[type="range"] { width: 100%; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
@@ -315,7 +354,7 @@
         </div>
         <label class="check">
           <input type="checkbox" id="keepLauncherOpen">
-          Держать лаунчер открытым после запуска игры
+          Держать лаунчер открытым во время игры (по умолчанию скрывается и вернётся после выхода)
         </label>
         <button class="btn primary" onclick="saveSettings()">СОХРАНИТЬ</button>
       </div>
@@ -337,14 +376,15 @@
           </div>
           <div class="field">
             <label>Версия</label>
-            <select id="newInstanceVersion"></select>
+            <div class="custom-select" id="newInstanceVersionSelect">
+              <button type="button" class="custom-select-trigger" id="newInstanceVersionTrigger" onclick="toggleCustomSelect('newInstanceVersionSelect')">—</button>
+              <div class="custom-select-menu" id="newInstanceVersionMenu"></div>
+            </div>
           </div>
         </div>
         <button class="btn" onclick="createInstance()">СОЗДАТЬ ИНСТАНС</button>
       </div>
     </div>
-  </div>
-
   </div>
 
   <div class="overlay" id="modsOverlay">
@@ -358,7 +398,10 @@
         <div class="row">
           <div class="field">
             <label>Инстанс для установки</label>
-            <select id="modsInstanceSelect" onchange="onModsInstanceChange()"></select>
+            <div class="custom-select" id="modsInstanceSelectWrap">
+              <button type="button" class="custom-select-trigger" id="modsInstanceTrigger" onclick="toggleCustomSelect('modsInstanceSelectWrap')">—</button>
+              <div class="custom-select-menu" id="modsInstanceMenu"></div>
+            </div>
           </div>
           <div class="field">
             <label>Версия игры инстанса</label>
@@ -369,7 +412,7 @@
           <div class="field" style="margin:0">
             <input type="text" id="modsSearch" placeholder="Поиск по названию, автору, репозиторию" oninput="onModsSearch()">
           </div>
-          <button class="btn-sm" onclick="javaApp.loadMods(document.getElementById('modsSearch').value || '', document.getElementById('modsInstanceSelect').value)">Обновить</button>
+          <button class="btn-sm" onclick="javaApp.loadMods(document.getElementById('modsSearch').value || '', modsState.instanceId || state.settings.selectedInstanceId)">Обновить</button>
         </div>
         <div class="mod-list" id="modList"></div>
         <div class="field">
@@ -390,6 +433,74 @@
     let state = { settings: {}, instances: [], versions: [] };
     let modsState = { mods: [], instanceId: '', gameVersionLabel: '' };
     let modsSearchTimer;
+    let newInstanceVersionId = '';
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.custom-select')) {
+        document.querySelectorAll('.custom-select.open').forEach(el => el.classList.remove('open'));
+      }
+    });
+
+    function toggleCustomSelect(id) {
+      const el = document.getElementById(id);
+      const wasOpen = el.classList.contains('open');
+      document.querySelectorAll('.custom-select.open').forEach(node => node.classList.remove('open'));
+      if (!wasOpen) el.classList.add('open');
+    }
+
+    function fillVersionDropdown(menuId, triggerId, versions, selectedId, onPick) {
+      const menu = document.getElementById(menuId);
+      const trigger = document.getElementById(triggerId);
+      menu.innerHTML = '';
+      const selected = versions.find(v => v.id === selectedId) || versions[0];
+      if (selected) {
+        trigger.textContent = selected.name;
+        if (!selectedId) onPick(selected.id);
+      } else {
+        trigger.textContent = '—';
+      }
+      versions.forEach(v => {
+        const opt = document.createElement('div');
+        opt.className = 'custom-select-option' + (selected && v.id === selected.id ? ' selected' : '');
+        opt.textContent = v.name;
+        opt.onclick = (e) => {
+          e.stopPropagation();
+          onPick(v.id);
+          trigger.textContent = v.name;
+          menu.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+          opt.classList.add('selected');
+          document.getElementById(menuId).parentElement.classList.remove('open');
+        };
+        menu.appendChild(opt);
+      });
+    }
+
+    function fillInstanceDropdown(menuId, triggerId, instances, selectedId, onPick) {
+      const menu = document.getElementById(menuId);
+      const trigger = document.getElementById(triggerId);
+      menu.innerHTML = '';
+      const selected = instances.find(i => i.id === selectedId) || instances[0];
+      if (selected) {
+        trigger.textContent = selected.name;
+        if (!selectedId) onPick(selected.id);
+      } else {
+        trigger.textContent = '—';
+      }
+      instances.forEach(inst => {
+        const opt = document.createElement('div');
+        opt.className = 'custom-select-option' + (selected && inst.id === selected.id ? ' selected' : '');
+        opt.innerHTML = '<div>' + escapeHtml(inst.name) + '</div><div style="font-size:10px;color:var(--text-dim)">' + escapeHtml(inst.dataPath || inst.id) + '</div>';
+        opt.onclick = (e) => {
+          e.stopPropagation();
+          onPick(inst.id);
+          trigger.textContent = inst.name;
+          menu.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
+          opt.classList.add('selected');
+          document.getElementById(menuId).parentElement.classList.remove('open');
+        };
+        menu.appendChild(opt);
+      });
+    }
 
     function applyBootstrap(data) {
       if (typeof data === 'string') data = JSON.parse(data);
@@ -433,59 +544,43 @@
           const row = document.createElement('div');
           row.className = 'instance-item' + (settings.selectedInstanceId === inst.id ? ' selected' : '');
           row.innerHTML =
-            '<div><div class="name">' + inst.name + '</div><div class="meta">' + inst.id + '</div></div>' +
+            '<div><div class="name">' + escapeHtml(inst.name) + '</div><div class="meta">' + escapeHtml(inst.dataPath || inst.id) + '</div></div>' +
             '<div class="instance-actions">' +
-              '<button class="btn-sm" onclick="selectInstance(\'' + inst.id + '\')">Выбрать</button>' +
-              (inst.id !== 'default' ? '<button class="btn-sm danger" onclick="deleteInstance(\'' + inst.id + '\')">Удалить</button>' : '') +
+              '<button class="btn-sm" onclick="selectInstance(\'' + escapeAttr(inst.id) + '\')">Выбрать</button>' +
+              (instances.length > 1 ? '<button class="btn-sm danger" onclick="deleteInstance(\'' + escapeAttr(inst.id) + '\')">Удалить</button>' : '') +
             '</div>';
           instanceList.appendChild(row);
         });
       }
 
-      const versionSelect = document.getElementById('newInstanceVersion');
-      if (versionSelect) {
-        versionSelect.innerHTML = '';
-        versions.forEach(v => {
-          const opt = document.createElement('option');
-          opt.value = v.id;
-          opt.textContent = v.name;
-          versionSelect.appendChild(opt);
-        });
-      }
+      fillVersionDropdown('newInstanceVersionMenu', 'newInstanceVersionTrigger', versions, newInstanceVersionId || settings.selectedVersionId, (id) => {
+        newInstanceVersionId = id;
+      });
 
       document.getElementById('minMemory').value = settings.minMemoryMb || 512;
       document.getElementById('maxMemory').value = settings.maxMemoryMb || 2048;
       document.getElementById('javaPath').value = settings.javaPath || '';
       document.getElementById('extraJvmArgs').value = settings.extraJvmArgs || '';
-      document.getElementById('keepLauncherOpen').checked = settings.keepLauncherOpen !== false;
+      document.getElementById('keepLauncherOpen').checked = settings.keepLauncherOpen === true;
       renderModsInstanceSelect();
     }
 
     function renderModsInstanceSelect() {
-      const select = document.getElementById('modsInstanceSelect');
-      if (!select) return;
       const settings = state.settings || {};
       const instances = state.instances || [];
-      select.innerHTML = '';
-      instances.forEach(inst => {
-        const opt = document.createElement('option');
-        opt.value = inst.id;
-        opt.textContent = inst.name;
-        if (inst.id === (modsState.instanceId || settings.selectedInstanceId)) opt.selected = true;
-        select.appendChild(opt);
+      const selectedId = modsState.instanceId || settings.selectedInstanceId;
+      fillInstanceDropdown('modsInstanceMenu', 'modsInstanceTrigger', instances, selectedId, (id) => {
+        modsState.instanceId = id;
+        javaApp.loadMods(document.getElementById('modsSearch').value || '', id);
       });
     }
 
-    function onModsInstanceChange() {
-      const select = document.getElementById('modsInstanceSelect');
-      modsState.instanceId = select.value;
-      javaApp.loadMods(document.getElementById('modsSearch').value || '', select.value);
-    }
+    function onModsInstanceChange() {}
 
     function onModsSearch() {
       clearTimeout(modsSearchTimer);
       modsSearchTimer = setTimeout(() => {
-        const instanceId = document.getElementById('modsInstanceSelect').value;
+        const instanceId = modsState.instanceId || state.settings.selectedInstanceId;
         javaApp.loadMods(document.getElementById('modsSearch').value || '', instanceId);
       }, 300);
     }
@@ -528,13 +623,13 @@
     }
 
     function installMod(repo, hasJava) {
-      const instanceId = document.getElementById('modsInstanceSelect').value;
+      const instanceId = modsState.instanceId || state.settings.selectedInstanceId;
       javaApp.installMod(repo, hasJava, instanceId);
     }
 
     function importGithubMod() {
       const input = document.getElementById('githubModInput').value;
-      const instanceId = document.getElementById('modsInstanceSelect').value;
+      const instanceId = modsState.instanceId || state.settings.selectedInstanceId;
       javaApp.importGithubMod(input, instanceId);
     }
 
@@ -561,7 +656,7 @@
 
     function createInstance() {
       const name = document.getElementById('newInstanceName').value;
-      const versionId = document.getElementById('newInstanceVersion').value;
+      const versionId = newInstanceVersionId || state.settings.selectedVersionId;
       javaApp.createInstance(name, versionId);
       document.getElementById('newInstanceName').value = '';
     }
@@ -581,7 +676,7 @@
       document.getElementById(name + 'Overlay').classList.add('open');
       if (name === 'mods') {
         renderModsInstanceSelect();
-        const instanceId = document.getElementById('modsInstanceSelect').value;
+        const instanceId = modsState.instanceId || state.settings.selectedInstanceId;
         javaApp.loadMods(document.getElementById('modsSearch')?.value || '', instanceId);
       }
     }

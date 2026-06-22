@@ -20,12 +20,15 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.DoubleConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class VersionDownloader {
-    private static final String RELEASES_API = "https://api.github.com/repos/Anuken/Mindustry/releases?per_page=30";
+    private static final String RELEASES_API = "https://api.github.com/repos/Anuken/Mindustry/releases";
+    private static final Pattern NEXT_LINK = Pattern.compile("<([^>]+)>;\\s*rel=\"next\"");
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
-            .connectTimeout(Duration.ofSeconds(20))
+            .connectTimeout(Duration.ofSeconds(30))
             .build();
 
     public List<GameVersion> listAvailable() {
@@ -37,7 +40,7 @@ public class VersionDownloader {
             version.cached = jarPath(version).toFile().exists();
             if (version.cached) version.sizeBytes = jarPath(version).toFile().length();
         }
-        versions.sort(Comparator.comparing((GameVersion v) -> v.id).reversed());
+        versions.sort(Comparator.comparingInt(VersionDownloader::versionSortKey).reversed());
         return versions;
     }
 
@@ -113,34 +116,53 @@ public class VersionDownloader {
 
     private List<GameVersion> fetchRemote() {
         List<GameVersion> remote = new ArrayList<>();
-        HttpRequest request = HttpRequest.newBuilder(URI.create(RELEASES_API))
-                .header("User-Agent", "SingularityLauncher")
-                .header("Accept", "application/vnd.github+json")
-                .GET()
-                .build();
-        try {
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 400) return remote;
+        String nextUrl = RELEASES_API + "?per_page=100";
 
-            JsonArray releases = JsonParser.parseString(response.body()).getAsJsonArray();
-            for (JsonElement element : releases) {
-                JsonObject release = element.getAsJsonObject();
-                String tag = release.get("tag_name").getAsString();
-                String name = release.has("name") ? release.get("name").getAsString() : tag;
-                JsonArray assets = release.getAsJsonArray("assets");
-                for (JsonElement assetEl : assets) {
-                    JsonObject asset = assetEl.getAsJsonObject();
-                    String assetName = asset.get("name").getAsString();
-                    if (!"Mindustry.jar".equals(assetName)) continue;
-                    String url = asset.get("browser_download_url").getAsString();
-                    GameVersion version = new GameVersion(tag, name, url, "remote");
-                    version.sizeBytes = asset.get("size").getAsLong();
-                    remote.add(version);
-                    break;
+        while (nextUrl != null) {
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(nextUrl))
+                        .header("User-Agent", "SingularityLauncher")
+                        .header("Accept", "application/vnd.github+json")
+                        .GET()
+                        .build();
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() >= 400) break;
+
+                JsonArray releases = JsonParser.parseString(response.body()).getAsJsonArray();
+                for (JsonElement element : releases) {
+                    JsonObject release = element.getAsJsonObject();
+                    String tag = release.get("tag_name").getAsString();
+                    String name = release.has("name") ? release.get("name").getAsString() : tag;
+                    JsonArray assets = release.getAsJsonArray("assets");
+                    for (JsonElement assetEl : assets) {
+                        JsonObject asset = assetEl.getAsJsonObject();
+                        String assetName = asset.get("name").getAsString();
+                        if (!"Mindustry.jar".equals(assetName)) continue;
+                        String url = asset.get("browser_download_url").getAsString();
+                        GameVersion version = new GameVersion(tag, name, url, "remote");
+                        version.sizeBytes = asset.get("size").getAsLong();
+                        remote.add(version);
+                        break;
+                    }
                 }
+
+                nextUrl = parseNextLink(response.headers().firstValue("Link").orElse(null));
+            } catch (Exception e) {
+                break;
             }
-        } catch (Exception ignored) {}
+        }
         return remote;
+    }
+
+    private static String parseNextLink(String linkHeader) {
+        if (linkHeader == null || linkHeader.isBlank()) return null;
+        Matcher matcher = NEXT_LINK.matcher(linkHeader);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private static int versionSortKey(GameVersion version) {
+        int[] parsed = GameVersionUtil.parse(version.id, version.name);
+        return parsed[0] * 1000 + parsed[1];
     }
 
     private void dedupe(List<GameVersion> versions) {

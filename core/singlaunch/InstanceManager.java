@@ -10,8 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.UUID;
+import java.util.Set;
 
 public class InstanceManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -23,28 +24,33 @@ public class InstanceManager {
 
         try (var stream = Files.list(dir)) {
             stream.filter(Files::isDirectory).forEach(instanceDir -> {
+                String folderName = instanceDir.getFileName().toString();
                 Path meta = instanceDir.resolve("instance.json");
-                if (!Files.exists(meta)) return;
-                try (Reader reader = Files.newBufferedReader(meta, StandardCharsets.UTF_8)) {
-                    InstanceInfo info = GSON.fromJson(reader, InstanceInfo.class);
-                    if (info != null) {
-                        if (info.id == null || info.id.isBlank()) info.id = instanceDir.getFileName().toString();
-                        result.add(info);
-                    }
-                } catch (IOException ignored) {}
+                InstanceInfo info = null;
+                if (Files.exists(meta)) {
+                    try (Reader reader = Files.newBufferedReader(meta, StandardCharsets.UTF_8)) {
+                        info = GSON.fromJson(reader, InstanceInfo.class);
+                    } catch (IOException ignored) {}
+                }
+                if (info == null) info = new InstanceInfo(folderName, folderName, null);
+                info.id = folderName;
+                if (info.name == null || info.name.isBlank()) info.name = folderName;
+                result.add(info);
             });
         } catch (IOException ignored) {}
 
         result.sort((a, b) -> Long.compare(a.createdAt, b.createdAt));
         if (result.isEmpty()) {
-            result.add(create("default", "Основной", null));
+            result.add(create("Основной", null));
         }
         return result;
     }
 
-    public InstanceInfo create(String id, String name, String versionId) {
-        if (id == null || id.isBlank()) id = UUID.randomUUID().toString().substring(0, 8);
-        InstanceInfo info = new InstanceInfo(id, name, versionId);
+    public InstanceInfo create(String name, String versionId) {
+        if (name == null || name.isBlank()) name = "Инстанс";
+        name = name.trim();
+        String folderName = allocateFolderName(name);
+        InstanceInfo info = new InstanceInfo(folderName, name, versionId);
         save(info);
         dataDir(info).toFile().mkdirs();
         dataDir(info).resolve("mods").toFile().mkdirs();
@@ -53,7 +59,7 @@ public class InstanceManager {
     }
 
     public void delete(String id) {
-        if ("default".equals(id)) return;
+        if (list().size() <= 1) return;
         Path dir = LauncherPaths.instancesDir().resolve(id);
         deleteRecursive(dir.toFile());
     }
@@ -76,6 +82,41 @@ public class InstanceManager {
 
     public static Path dataDir(InstanceInfo info) {
         return LauncherPaths.instancesDir().resolve(info.id).resolve("data");
+    }
+
+    public static String dataPathLabel(InstanceInfo info) {
+        return LauncherPaths.instancesDir().resolve(info.id).resolve("data").toString();
+    }
+
+    private String allocateFolderName(String displayName) {
+        Set<String> used = new HashSet<>();
+        Path dir = LauncherPaths.instancesDir();
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                stream.filter(Files::isDirectory).forEach(p -> used.add(p.getFileName().toString()));
+            } catch (IOException ignored) {}
+        }
+
+        String base = sanitizeFolderName(displayName);
+        if (base.isEmpty()) base = "Инстанс";
+        String candidate = base;
+        int suffix = 2;
+        while (used.contains(candidate)) {
+            candidate = base + " (" + suffix + ")";
+            suffix++;
+        }
+        return candidate;
+    }
+
+    private static String sanitizeFolderName(String name) {
+        String cleaned = name.trim()
+                .replaceAll("[\\\\/:*?\"<>|]", "_")
+                .replaceAll("\\s+", " ")
+                .strip();
+        while (cleaned.endsWith(".") || cleaned.endsWith(" ")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1).strip();
+        }
+        return cleaned;
     }
 
     private static void deleteRecursive(java.io.File file) {

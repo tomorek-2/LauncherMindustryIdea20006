@@ -30,7 +30,9 @@ public class SingularityLauncher extends Application {
         webEngine = webView.getEngine();
         webEngine.setJavaScriptEnabled(true);
 
-        bridge = new JavaBridge(configManager, instanceManager, versionDownloader, gameLauncher, webEngine, this::setStatus);
+        LauncherWindow launcherWindow = new LauncherWindow(stage);
+
+        bridge = new JavaBridge(configManager, instanceManager, versionDownloader, gameLauncher, webEngine, this::setStatus, launcherWindow);
 
         try {
             String html = ResourceLoader.loadWebPage();
@@ -56,7 +58,6 @@ public class SingularityLauncher extends Application {
         stage.setTitle("Singularity Launcher");
         stage.setScene(scene);
         stage.setResizable(false);
-        stage.setOnHidden(e -> Platform.exit());
         HyprlandSupport.floatOnOpen(stage);
         stage.show();
     }

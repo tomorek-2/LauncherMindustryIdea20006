@@ -7,6 +7,7 @@ import javafx.concurrent.Task;
 import javafx.scene.web.WebEngine;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,10 +29,11 @@ public class JavaBridge {
     private final ModInstaller modInstaller;
     private final WebEngine webEngine;
     private final Consumer<String> status;
+    private final LauncherWindow launcherWindow;
 
     public JavaBridge(ConfigManager configManager, InstanceManager instanceManager,
                       VersionDownloader versionDownloader, GameLauncher gameLauncher,
-                      WebEngine webEngine, Consumer<String> status) {
+                      WebEngine webEngine, Consumer<String> status, LauncherWindow launcherWindow) {
         this.configManager = configManager;
         this.instanceManager = instanceManager;
         this.versionDownloader = versionDownloader;
@@ -40,6 +42,7 @@ public class JavaBridge {
         this.modInstaller = new ModInstaller();
         this.webEngine = webEngine;
         this.status = status;
+        this.launcherWindow = launcherWindow;
     }
 
     public String getBootstrapData() {
@@ -61,8 +64,18 @@ public class JavaBridge {
                 : new int[]{0, 0};
 
         Map<String, Object> payload = new HashMap<>();
+        List<Map<String, Object>> instanceRows = new ArrayList<>();
+        for (InstanceInfo inst : instances) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("id", inst.id);
+            row.put("name", inst.name);
+            row.put("versionId", inst.versionId);
+            row.put("createdAt", inst.createdAt);
+            row.put("dataPath", InstanceManager.dataPathLabel(inst));
+            instanceRows.add(row);
+        }
         payload.put("settings", settings);
-        payload.put("instances", instances);
+        payload.put("instances", instanceRows);
         payload.put("versions", versions);
         payload.put("launcherDir", LauncherPaths.root().toAbsolutePath().toString());
         payload.put("systemRamMb", (int) (Runtime.getRuntime().maxMemory() / (1024 * 1024)));
@@ -99,7 +112,7 @@ public class JavaBridge {
 
     public void createInstance(String name, String versionId) {
         if (name == null || name.isBlank()) name = "Инстанс";
-        InstanceInfo created = instanceManager.create(null, name.trim(), versionId);
+        InstanceInfo created = instanceManager.create(name.trim(), versionId);
         LauncherSettings settings = configManager.getSettings();
         settings.selectedInstanceId = created.id;
         configManager.save();
@@ -138,16 +151,30 @@ public class JavaBridge {
 
                 updateMessage("Запуск...");
                 Platform.runLater(() -> runJs("setDownloadProgress(1, 'Запуск...')"));
-                gameLauncher.launch(instance, version, settings, gameJar);
+                Process process = gameLauncher.launch(instance, version, settings, gameJar);
+
+                boolean keepOpen = configManager.getSettings().keepLauncherOpen;
+                if (!keepOpen) {
+                    Platform.runLater(() -> launcherWindow.hideForGame());
+                }
+
+                process.waitFor();
+
+                if (!keepOpen) {
+                    Platform.runLater(() -> {
+                        launcherWindow.showAfterGame();
+                        refreshData();
+                        status.accept("Игра закрыта — лаунчер снова активен");
+                    });
+                }
                 return null;
             }
 
             @Override
             protected void succeeded() {
                 runJs("setDownloadProgress(-1, '')");
-                status.accept("Запущено: " + instance.name);
-                if (!configManager.getSettings().keepLauncherOpen) {
-                    Platform.exit();
+                if (configManager.getSettings().keepLauncherOpen) {
+                    status.accept("Запущено: " + instance.name);
                 }
             }
 
