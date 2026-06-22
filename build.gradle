@@ -72,6 +72,12 @@ tasks.named('build') {
     dependsOn shadowJar
 }
 
+tasks.register('assembleApk') {
+    group = 'distribution'
+    description = 'Build Android debug APK (requires Android SDK: ANDROID_HOME or local.properties)'
+    dependsOn ':android:assembleDebug'
+}
+
 tasks.register('distLauncher', Copy) {
     group = 'distribution'
     description = 'Assemble launcher JAR and run script'

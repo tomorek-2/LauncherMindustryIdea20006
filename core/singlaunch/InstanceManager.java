@@ -7,15 +7,18 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public class InstanceManager {
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final Gson GSON = new GsonBuilder().create();
 
     public List<InstanceInfo> list() {
         List<InstanceInfo> result = new ArrayList<>();
@@ -59,9 +62,25 @@ public class InstanceManager {
     }
 
     public void delete(String id) {
-        if (list().size() <= 1) return;
+        if (countInstances() <= 1) return;
         Path dir = LauncherPaths.instancesDir().resolve(id);
-        deleteRecursive(dir.toFile());
+        if (!Files.isDirectory(dir)) return;
+        try {
+            Files.walkFileTree(dir, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path directory, IOException exc) throws IOException {
+                    if (exc != null) throw exc;
+                    Files.delete(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException ignored) {}
     }
 
     public InstanceInfo get(String id) {
@@ -119,13 +138,13 @@ public class InstanceManager {
         return cleaned;
     }
 
-    private static void deleteRecursive(java.io.File file) {
-        if (file.isDirectory()) {
-            java.io.File[] children = file.listFiles();
-            if (children != null) {
-                for (java.io.File child : children) deleteRecursive(child);
-            }
+    private int countInstances() {
+        Path dir = LauncherPaths.instancesDir();
+        if (!Files.isDirectory(dir)) return 0;
+        try (var stream = Files.list(dir)) {
+            return (int) stream.filter(Files::isDirectory).count();
+        } catch (IOException e) {
+            return 0;
         }
-        file.delete();
     }
 }

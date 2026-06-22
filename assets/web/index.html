@@ -376,9 +376,8 @@
           </div>
           <div class="field">
             <label>Версия</label>
-            <div class="custom-select" id="newInstanceVersionSelect">
-              <button type="button" class="custom-select-trigger" id="newInstanceVersionTrigger" onclick="toggleCustomSelect('newInstanceVersionSelect')">—</button>
-              <div class="custom-select-menu" id="newInstanceVersionMenu"></div>
+            <div class="custom-select">
+              <button type="button" class="custom-select-trigger" id="newInstanceVersionTrigger" onclick="openVersionPicker('new')">—</button>
             </div>
           </div>
         </div>
@@ -398,9 +397,8 @@
         <div class="row">
           <div class="field">
             <label>Инстанс для установки</label>
-            <div class="custom-select" id="modsInstanceSelectWrap">
-              <button type="button" class="custom-select-trigger" id="modsInstanceTrigger" onclick="toggleCustomSelect('modsInstanceSelectWrap')">—</button>
-              <div class="custom-select-menu" id="modsInstanceMenu"></div>
+            <div class="custom-select">
+              <button type="button" class="custom-select-trigger" id="modsInstanceTrigger" onclick="openInstancePicker()">—</button>
             </div>
           </div>
           <div class="field">
@@ -435,71 +433,46 @@
     let modsSearchTimer;
     let newInstanceVersionId = '';
 
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('.custom-select')) {
-        document.querySelectorAll('.custom-select.open').forEach(el => el.classList.remove('open'));
-      }
-    });
-
-    function toggleCustomSelect(id) {
-      const el = document.getElementById(id);
-      const wasOpen = el.classList.contains('open');
-      document.querySelectorAll('.custom-select.open').forEach(node => node.classList.remove('open'));
-      if (!wasOpen) el.classList.add('open');
+    function openVersionPicker(mode) {
+      const trigger = document.getElementById(mode === 'new' ? 'newInstanceVersionTrigger' : 'newInstanceVersionTrigger');
+      const rect = trigger.getBoundingClientRect();
+      const selectedId = mode === 'new' ? (newInstanceVersionId || state.settings.selectedVersionId) : state.settings.selectedVersionId;
+      const items = (state.versions || []).map(v => ({ id: v.id, label: v.name }));
+      javaApp.openPicker(JSON.stringify(items), selectedId || '', rect.left, rect.bottom, 'onVersionPicked');
     }
 
-    function fillVersionDropdown(menuId, triggerId, versions, selectedId, onPick) {
-      const menu = document.getElementById(menuId);
-      const trigger = document.getElementById(triggerId);
-      menu.innerHTML = '';
-      const selected = versions.find(v => v.id === selectedId) || versions[0];
-      if (selected) {
-        trigger.textContent = selected.name;
-        if (!selectedId) onPick(selected.id);
-      } else {
-        trigger.textContent = '—';
-      }
-      versions.forEach(v => {
-        const opt = document.createElement('div');
-        opt.className = 'custom-select-option' + (selected && v.id === selected.id ? ' selected' : '');
-        opt.textContent = v.name;
-        opt.onclick = (e) => {
-          e.stopPropagation();
-          onPick(v.id);
-          trigger.textContent = v.name;
-          menu.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
-          opt.classList.add('selected');
-          document.getElementById(menuId).parentElement.classList.remove('open');
-        };
-        menu.appendChild(opt);
-      });
+    function onVersionPicked(id) {
+      newInstanceVersionId = id;
+      const v = (state.versions || []).find(x => x.id === id);
+      document.getElementById('newInstanceVersionTrigger').textContent = v ? v.name : id;
     }
 
-    function fillInstanceDropdown(menuId, triggerId, instances, selectedId, onPick) {
-      const menu = document.getElementById(menuId);
-      const trigger = document.getElementById(triggerId);
-      menu.innerHTML = '';
-      const selected = instances.find(i => i.id === selectedId) || instances[0];
-      if (selected) {
-        trigger.textContent = selected.name;
-        if (!selectedId) onPick(selected.id);
-      } else {
-        trigger.textContent = '—';
-      }
-      instances.forEach(inst => {
-        const opt = document.createElement('div');
-        opt.className = 'custom-select-option' + (selected && inst.id === selected.id ? ' selected' : '');
-        opt.innerHTML = '<div>' + escapeHtml(inst.name) + '</div><div style="font-size:10px;color:var(--text-dim)">' + escapeHtml(inst.dataPath || inst.id) + '</div>';
-        opt.onclick = (e) => {
-          e.stopPropagation();
-          onPick(inst.id);
-          trigger.textContent = inst.name;
-          menu.querySelectorAll('.custom-select-option').forEach(o => o.classList.remove('selected'));
-          opt.classList.add('selected');
-          document.getElementById(menuId).parentElement.classList.remove('open');
-        };
-        menu.appendChild(opt);
-      });
+    function openInstancePicker() {
+      const trigger = document.getElementById('modsInstanceTrigger');
+      const rect = trigger.getBoundingClientRect();
+      const selectedId = modsState.instanceId || state.settings.selectedInstanceId;
+      const items = (state.instances || []).map(i => ({ id: i.id, label: i.name }));
+      javaApp.openPicker(JSON.stringify(items), selectedId || '', rect.left, rect.bottom, 'onModsInstancePicked');
+    }
+
+    function onModsInstancePicked(id) {
+      modsState.instanceId = id;
+      const inst = (state.instances || []).find(i => i.id === id);
+      document.getElementById('modsInstanceTrigger').textContent = inst ? inst.name : id;
+      javaApp.loadMods(document.getElementById('modsSearch').value || '', id);
+    }
+
+    function applyInstances(data) {
+      if (typeof data === 'string') data = JSON.parse(data);
+      state.instances = data.instances || state.instances;
+      state.settings = data.settings || state.settings;
+      renderInstancesOnly();
+    }
+
+    function applyVersions(versions) {
+      if (typeof versions === 'string') versions = JSON.parse(versions);
+      state.versions = versions || [];
+      renderAll();
     }
 
     function applyBootstrap(data) {
@@ -508,7 +481,7 @@
       renderAll();
     }
 
-    function renderAll() {
+    function renderInstancesOnly() {
       const settings = state.settings || {};
       const instances = state.instances || [];
       const versions = state.versions || [];
@@ -521,21 +494,6 @@
         '<b>' + (selectedInstance ? selectedInstance.name : '—') + '</b><br>' +
         'Версия: ' + (selectedVersion ? selectedVersion.name : '—') + '<br>' +
         'RAM: ' + settings.minMemoryMb + '–' + settings.maxMemoryMb + ' МБ';
-      document.getElementById('footerPath').textContent = state.launcherDir || '—';
-
-      const versionList = document.getElementById('versionList');
-      versionList.innerHTML = '';
-      versions.forEach(v => {
-        const li = document.createElement('li');
-        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
-        li.innerHTML = '<span>' + v.name + '</span><span class="tag">' + (v.cached ? 'кэш' : 'скачать') + '</span>';
-        li.onclick = () => {
-          javaApp.selectVersion(v.id);
-          if (!v.cached) javaApp.downloadVersion(v.id);
-          else renderAll();
-        };
-        versionList.appendChild(li);
-      });
 
       const instanceList = document.getElementById('instanceList');
       if (instanceList) {
@@ -553,8 +511,31 @@
         });
       }
 
-      fillVersionDropdown('newInstanceVersionMenu', 'newInstanceVersionTrigger', versions, newInstanceVersionId || settings.selectedVersionId, (id) => {
-        newInstanceVersionId = id;
+      updateVersionTrigger();
+      renderModsInstanceSelect();
+    }
+
+    function renderAll() {
+      const settings = state.settings || {};
+      const instances = state.instances || [];
+      const versions = state.versions || [];
+      const selectedInstance = instances.find(i => i.id === settings.selectedInstanceId) || instances[0];
+      const selectedVersion = versions.find(v => v.id === settings.selectedVersionId) || versions[0];
+
+      document.getElementById('footerPath').textContent = state.launcherDir || '—';
+
+      const versionList = document.getElementById('versionList');
+      versionList.innerHTML = '';
+      versions.forEach(v => {
+        const li = document.createElement('li');
+        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
+        li.innerHTML = '<span>' + v.name + '</span><span class="tag">' + (v.cached ? 'кэш' : 'скачать') + '</span>';
+        li.onclick = () => {
+          javaApp.selectVersion(v.id);
+          if (!v.cached) javaApp.downloadVersion(v.id);
+          else renderAll();
+        };
+        versionList.appendChild(li);
       });
 
       document.getElementById('minMemory').value = settings.minMemoryMb || 512;
@@ -562,17 +543,25 @@
       document.getElementById('javaPath').value = settings.javaPath || '';
       document.getElementById('extraJvmArgs').value = settings.extraJvmArgs || '';
       document.getElementById('keepLauncherOpen').checked = settings.keepLauncherOpen === true;
-      renderModsInstanceSelect();
+      renderInstancesOnly();
+    }
+
+    function updateVersionTrigger() {
+      const versions = state.versions || [];
+      const settings = state.settings || {};
+      const selected = versions.find(v => v.id === (newInstanceVersionId || settings.selectedVersionId)) || versions[0];
+      const trigger = document.getElementById('newInstanceVersionTrigger');
+      if (trigger) trigger.textContent = selected ? selected.name : '—';
+      if (!newInstanceVersionId && selected) newInstanceVersionId = selected.id;
     }
 
     function renderModsInstanceSelect() {
       const settings = state.settings || {};
       const instances = state.instances || [];
       const selectedId = modsState.instanceId || settings.selectedInstanceId;
-      fillInstanceDropdown('modsInstanceMenu', 'modsInstanceTrigger', instances, selectedId, (id) => {
-        modsState.instanceId = id;
-        javaApp.loadMods(document.getElementById('modsSearch').value || '', id);
-      });
+      const inst = instances.find(i => i.id === selectedId) || instances[0];
+      const trigger = document.getElementById('modsInstanceTrigger');
+      if (trigger) trigger.textContent = inst ? inst.name : '—';
     }
 
     function onModsInstanceChange() {}

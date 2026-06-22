@@ -32,7 +32,7 @@ public class SingularityLauncher extends Application {
 
         LauncherWindow launcherWindow = new LauncherWindow(stage);
 
-        bridge = new JavaBridge(configManager, instanceManager, versionDownloader, gameLauncher, webEngine, this::setStatus, launcherWindow);
+        bridge = new JavaBridge(configManager, instanceManager, versionDownloader, gameLauncher, webEngine, webView, this::setStatus, launcherWindow);
 
         try {
             String html = ResourceLoader.loadWebPage();
@@ -46,7 +46,10 @@ public class SingularityLauncher extends Application {
             if (state == Worker.State.SUCCEEDED) {
                 JSObject window = (JSObject) webEngine.executeScript("window");
                 window.setMember("javaApp", bridge);
-                Platform.runLater(() -> webEngine.executeScript("applyBootstrap(" + bridge.getBootstrapData() + ")"));
+                Platform.runLater(() -> {
+                    webEngine.executeScript("applyBootstrap(" + bridge.getBootstrapDataFast() + ")");
+                    bridge.refreshVersionsAsync();
+                });
             }
         });
 

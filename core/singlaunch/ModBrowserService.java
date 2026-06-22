@@ -5,15 +5,11 @@ import com.google.gson.reflect.TypeToken;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public class ModBrowserService {
     private static final String[] MOD_JSON_URLS = {
@@ -22,11 +18,7 @@ public class ModBrowserService {
     };
     private static final Gson GSON = new Gson();
     private static final Type LIST_TYPE = new TypeToken<List<ModListing>>() {}.getType();
-
-    private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
-            .connectTimeout(Duration.ofSeconds(20))
-            .build();
+    private static final Map<String, String> HEADERS = Map.of("User-Agent", "SingularityLauncher");
 
     private List<ModListing> cache;
 
@@ -36,21 +28,12 @@ public class ModBrowserService {
         IOException lastError = null;
         for (String url : MOD_JSON_URLS) {
             try {
-                HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                        .header("User-Agent", "SingularityLauncher")
-                        .GET()
-                        .build();
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() >= 400) continue;
-
-                List<ModListing> list = GSON.fromJson(response.body(), LIST_TYPE);
+                String body = HttpUtil.getString(url, HEADERS);
+                List<ModListing> list = GSON.fromJson(body, LIST_TYPE);
                 if (list == null) list = new ArrayList<>();
                 list.sort(Comparator.comparing((ModListing m) -> m.lastUpdated != null ? m.lastUpdated : "").reversed());
                 cache = list;
                 return list;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException("Загрузка списка модов прервана", e);
             } catch (IOException e) {
                 lastError = e;
             }

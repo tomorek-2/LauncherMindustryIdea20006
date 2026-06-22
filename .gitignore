@@ -1,5 +1,8 @@
 .gradle/
 build/
+android/build/
+local.properties
 AGENTS.md
 .idea/
 *.iml
+*.apk

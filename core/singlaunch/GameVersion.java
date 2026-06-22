@@ -7,6 +7,7 @@ public class GameVersion {
     public String source;
     public boolean cached;
     public long sizeBytes;
+    public String apkUrl;
 
     public GameVersion() {}
 

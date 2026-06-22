@@ -6,19 +6,12 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.function.DoubleConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -26,12 +19,55 @@ import java.util.regex.Pattern;
 public class VersionDownloader {
     private static final String RELEASES_API = "https://api.github.com/repos/Anuken/Mindustry/releases";
     private static final Pattern NEXT_LINK = Pattern.compile("<([^>]+)>;\\s*rel=\"next\"");
-    private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private static final Map<String, String> GH_HEADERS = Map.of(
+            "User-Agent", "SingularityLauncher",
+            "Accept", "application/vnd.github+json"
+    );
+
+    private volatile List<GameVersion> cachedVersions;
+    private volatile long cachedAt;
+    private static final long CACHE_TTL_MS = 10 * 60 * 1000;
 
     public List<GameVersion> listAvailable() {
+        List<GameVersion> cached = cachedVersions;
+        if (cached != null && System.currentTimeMillis() - cachedAt < CACHE_TTL_MS) {
+            updateCacheFlags(cached);
+            return new ArrayList<>(cached);
+        }
+        List<GameVersion> fresh = loadAvailable();
+        cachedVersions = fresh;
+        cachedAt = System.currentTimeMillis();
+        return new ArrayList<>(fresh);
+    }
+
+    public void refreshAsync(Runnable onDone) {
+        Thread thread = new Thread(() -> {
+            List<GameVersion> fresh = loadAvailable();
+            cachedVersions = fresh;
+            cachedAt = System.currentTimeMillis();
+            if (onDone != null) onDone.run();
+        }, "version-refresh");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    public List<GameVersion> peekCachedOrLocal() {
+        List<GameVersion> cached = cachedVersions;
+        if (cached != null) {
+            updateCacheFlags(cached);
+            return new ArrayList<>(cached);
+        }
+        List<GameVersion> local = scanLegacyLocal();
+        local.sort(Comparator.comparingInt(VersionDownloader::versionSortKey).reversed());
+        return local;
+    }
+
+    public void invalidateCache() {
+        cachedVersions = null;
+        cachedAt = 0;
+    }
+
+    private List<GameVersion> loadAvailable() {
         List<GameVersion> versions = new ArrayList<>();
         versions.addAll(scanLegacyLocal());
         versions.addAll(fetchRemote());
@@ -44,51 +80,44 @@ public class VersionDownloader {
         return versions;
     }
 
+    private void updateCacheFlags(List<GameVersion> versions) {
+        for (GameVersion version : versions) {
+            version.cached = jarPath(version).toFile().exists();
+            if (version.cached) version.sizeBytes = jarPath(version).toFile().length();
+        }
+    }
+
+    public Path apkPath(GameVersion version) {
+        if ("local".equals(version.source)) {
+            return Path.of(version.downloadUrl);
+        }
+        return LauncherPaths.versionsCacheDir().resolve(version.id).resolve("Mindustry.apk");
+    }
+
+    public Path ensureApkDownloaded(GameVersion version, DoubleConsumer progress) throws IOException {
+        if (version.apkUrl == null || version.apkUrl.isBlank()) {
+            throw new IOException("Нет APK для версии " + version.id);
+        }
+        Path target = apkPath(version);
+        if (Files.exists(target) && Files.size(target) > 0) {
+            if (progress != null) progress.accept(1.0);
+            return target;
+        }
+        HttpUtil.download(version.apkUrl, target, progress);
+        return target;
+    }
+
     public Path ensureDownloaded(GameVersion version, DoubleConsumer progress) throws IOException {
         Path target = jarPath(version);
         if (Files.exists(target) && Files.size(target) > 0) {
             if (progress != null) progress.accept(1.0);
             return target;
         }
-
         if (version.downloadUrl == null || version.downloadUrl.isBlank()) {
             throw new IOException("Нет URL для версии " + version.id);
         }
-
-        Files.createDirectories(target.getParent());
-        Path temp = target.resolveSibling(target.getFileName() + ".part");
-
-        HttpRequest request = HttpRequest.newBuilder(URI.create(version.downloadUrl))
-                .header("User-Agent", "SingularityLauncher")
-                .GET()
-                .build();
-
-        try {
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() >= 400) {
-                throw new IOException("HTTP " + response.statusCode());
-            }
-
-            long total = response.headers().firstValueAsLong("Content-Length").orElse(-1);
-            try (InputStream in = response.body(); OutputStream out = Files.newOutputStream(temp)) {
-                byte[] buffer = new byte[8192];
-                long done = 0;
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
-                    done += read;
-                    if (progress != null && total > 0) progress.accept((double) done / total);
-                }
-            }
-            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-            if (progress != null) progress.accept(1.0);
-            return target;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Загрузка прервана", e);
-        } finally {
-            Files.deleteIfExists(temp);
-        }
+        HttpUtil.download(version.downloadUrl, target, progress);
+        return target;
     }
 
     public Path jarPath(GameVersion version) {
@@ -120,33 +149,39 @@ public class VersionDownloader {
 
         while (nextUrl != null) {
             try {
-                HttpRequest request = HttpRequest.newBuilder(URI.create(nextUrl))
-                        .header("User-Agent", "SingularityLauncher")
-                        .header("Accept", "application/vnd.github+json")
-                        .GET()
-                        .build();
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() >= 400) break;
-
-                JsonArray releases = JsonParser.parseString(response.body()).getAsJsonArray();
+                HttpUtil.HttpResult result = HttpUtil.getWithHeaders(nextUrl, GH_HEADERS);
+                String body = result.body;
+                JsonArray releases = JsonParser.parseString(body).getAsJsonArray();
                 for (JsonElement element : releases) {
                     JsonObject release = element.getAsJsonObject();
                     String tag = release.get("tag_name").getAsString();
                     String name = release.has("name") ? release.get("name").getAsString() : tag;
                     JsonArray assets = release.getAsJsonArray("assets");
+                    String jarUrl = null;
+                    String apkUrl = null;
+                    long jarSize = 0;
                     for (JsonElement assetEl : assets) {
                         JsonObject asset = assetEl.getAsJsonObject();
                         String assetName = asset.get("name").getAsString();
-                        if (!"Mindustry.jar".equals(assetName)) continue;
-                        String url = asset.get("browser_download_url").getAsString();
-                        GameVersion version = new GameVersion(tag, name, url, "remote");
-                        version.sizeBytes = asset.get("size").getAsLong();
+                        if ("Mindustry.jar".equals(assetName)) {
+                            jarUrl = asset.get("browser_download_url").getAsString();
+                            jarSize = asset.get("size").getAsLong();
+                        } else if (assetName.endsWith(".apk")) {
+                            apkUrl = asset.get("browser_download_url").getAsString();
+                        }
+                    }
+                    if (jarUrl != null) {
+                        GameVersion version = new GameVersion(tag, name, jarUrl, "remote");
+                        version.sizeBytes = jarSize;
+                        version.apkUrl = apkUrl;
                         remote.add(version);
-                        break;
+                    } else if (apkUrl != null) {
+                        GameVersion version = new GameVersion(tag, name, "", "remote");
+                        version.apkUrl = apkUrl;
+                        remote.add(version);
                     }
                 }
-
-                nextUrl = parseNextLink(response.headers().firstValue("Link").orElse(null));
+                nextUrl = parseNextLink(result.linkHeader);
             } catch (Exception e) {
                 break;
             }

@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.scene.web.WebEngine;
+import javafx.scene.web.WebView;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,63 +28,39 @@ public class JavaBridge {
     private final GameLauncher gameLauncher;
     private final ModBrowserService modBrowserService;
     private final ModInstaller modInstaller;
+    private final LauncherService service;
     private final WebEngine webEngine;
+    private final WebView webView;
     private final Consumer<String> status;
     private final LauncherWindow launcherWindow;
 
     public JavaBridge(ConfigManager configManager, InstanceManager instanceManager,
                       VersionDownloader versionDownloader, GameLauncher gameLauncher,
-                      WebEngine webEngine, Consumer<String> status, LauncherWindow launcherWindow) {
+                      WebEngine webEngine, WebView webView, Consumer<String> status, LauncherWindow launcherWindow) {
         this.configManager = configManager;
         this.instanceManager = instanceManager;
         this.versionDownloader = versionDownloader;
         this.gameLauncher = gameLauncher;
+        this.service = new LauncherService(configManager, instanceManager, versionDownloader);
         this.modBrowserService = new ModBrowserService();
         this.modInstaller = new ModInstaller();
         this.webEngine = webEngine;
+        this.webView = webView;
         this.status = status;
         this.launcherWindow = launcherWindow;
     }
 
     public String getBootstrapData() {
-        LauncherSettings settings = configManager.getSettings();
-        List<InstanceInfo> instances = instanceManager.list();
-        List<GameVersion> versions = versionDownloader.listAvailable();
+        return service.getBootstrapData();
+    }
 
-        if (settings.selectedInstanceId == null || settings.selectedInstanceId.isBlank()) {
-            settings.selectedInstanceId = instances.get(0).id;
-        }
-        if ((settings.selectedVersionId == null || settings.selectedVersionId.isBlank()) && !versions.isEmpty()) {
-            settings.selectedVersionId = versions.get(0).id;
-        }
+    public String getBootstrapDataFast() {
+        return service.getBootstrapData(versionDownloader.peekCachedOrLocal());
+    }
 
-        InstanceInfo instance = instanceManager.get(settings.selectedInstanceId);
-        GameVersion version = findVersion(resolveVersionId(instance, settings));
-        int[] parsed = version != null
-                ? GameVersionUtil.parse(version.id, version.name)
-                : new int[]{0, 0};
-
-        Map<String, Object> payload = new HashMap<>();
-        List<Map<String, Object>> instanceRows = new ArrayList<>();
-        for (InstanceInfo inst : instances) {
-            Map<String, Object> row = new HashMap<>();
-            row.put("id", inst.id);
-            row.put("name", inst.name);
-            row.put("versionId", inst.versionId);
-            row.put("createdAt", inst.createdAt);
-            row.put("dataPath", InstanceManager.dataPathLabel(inst));
-            instanceRows.add(row);
-        }
-        payload.put("settings", settings);
-        payload.put("instances", instanceRows);
-        payload.put("versions", versions);
-        payload.put("launcherDir", LauncherPaths.root().toAbsolutePath().toString());
-        payload.put("systemRamMb", (int) (Runtime.getRuntime().maxMemory() / (1024 * 1024)));
-        payload.put("gameBuild", parsed[0]);
-        payload.put("gameRevision", parsed[1]);
-        payload.put("gameVersionLabel", GameVersionUtil.format(parsed[0], parsed[1]));
-        payload.put("installedModKeys", listInstalledModKeys(instance));
-        return GSON.toJson(payload);
+    public void refreshVersionsAsync() {
+        versionDownloader.refreshAsync(() -> Platform.runLater(() ->
+                runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")")));
     }
 
     public void saveSettings(String json) {
@@ -100,7 +77,7 @@ public class JavaBridge {
         configManager.save();
         InstanceInfo instance = instanceManager.get(id);
         runJs("onInstanceSelected(" + jsQuote(instance.name) + ")");
-        refreshData();
+        refreshInstances();
     }
 
     public void selectVersion(String id) {
@@ -112,28 +89,45 @@ public class JavaBridge {
 
     public void createInstance(String name, String versionId) {
         if (name == null || name.isBlank()) name = "Инстанс";
-        InstanceInfo created = instanceManager.create(name.trim(), versionId);
-        LauncherSettings settings = configManager.getSettings();
-        settings.selectedInstanceId = created.id;
-        configManager.save();
-        refreshData();
-        runJs("showToast('Создан инстанс: " + escapeJs(created.name) + "')");
+        final String finalName = name.trim();
+        final String finalVersionId = versionId;
+        Thread thread = new Thread(() -> {
+            InstanceInfo created = instanceManager.create(finalName, finalVersionId);
+            LauncherSettings settings = configManager.getSettings();
+            settings.selectedInstanceId = created.id;
+            configManager.save();
+            Platform.runLater(() -> {
+                refreshInstances();
+                runJs("showToast('Создан инстанс: " + escapeJs(created.name) + "')");
+            });
+        }, "instance-create");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     public void deleteInstance(String id) {
-        instanceManager.delete(id);
-        LauncherSettings settings = configManager.getSettings();
-        if (id.equals(settings.selectedInstanceId)) {
-            settings.selectedInstanceId = instanceManager.list().get(0).id;
-            configManager.save();
-        }
-        refreshData();
+        Thread thread = new Thread(() -> {
+            instanceManager.delete(id);
+            LauncherSettings settings = configManager.getSettings();
+            if (id.equals(settings.selectedInstanceId)) {
+                settings.selectedInstanceId = instanceManager.list().get(0).id;
+                configManager.save();
+            }
+            Platform.runLater(this::refreshInstances);
+        }, "instance-delete");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    public void openPicker(String itemsJson, String selectedId, double x, double y, String callback) {
+        OverlayDropdown.showAt(webView, x, y, itemsJson, selectedId, value ->
+                runJs(callback + "(" + jsQuote(value) + ")"));
     }
 
     public void play() {
         LauncherSettings settings = configManager.getSettings();
         InstanceInfo instance = instanceManager.get(settings.selectedInstanceId);
-        GameVersion version = findVersion(resolveVersionId(instance, settings));
+        GameVersion version = service.findVersion(service.resolveVersionId(instance));
         if (version == null) {
             status.accept("Версия не выбрана");
             return;
@@ -163,7 +157,7 @@ public class JavaBridge {
                 if (!keepOpen) {
                     Platform.runLater(() -> {
                         launcherWindow.showAfterGame();
-                        refreshData();
+                        refreshInstances();
                         status.accept("Игра закрыта — лаунчер снова активен");
                     });
                 }
@@ -209,7 +203,8 @@ public class JavaBridge {
             @Override
             protected void succeeded() {
                 runJs("setDownloadProgress(-1, '')");
-                refreshData();
+                versionDownloader.invalidateCache();
+                runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")");
                 runJs("showToast('Версия загружена')");
             }
 
@@ -257,11 +252,11 @@ public class JavaBridge {
             protected String call() throws Exception {
                 List<ModListing> mods = modBrowserService.search(query);
                 InstanceInfo instance = resolveModsInstance(instanceId);
-                GameVersion version = findVersion(resolveVersionId(instance, configManager.getSettings()));
+                GameVersion version = service.findVersion(service.resolveVersionId(instance));
                 int[] parsed = version != null
                         ? GameVersionUtil.parse(version.id, version.name)
                         : new int[]{0, 0};
-                Set<String> installed = listInstalledModKeys(instance);
+                Set<String> installed = service.listInstalledModKeys(instance);
 
                 List<Map<String, Object>> rows = new ArrayList<>();
                 for (ModListing mod : mods) {
@@ -333,7 +328,7 @@ public class JavaBridge {
             protected void succeeded() {
                 runJs("setDownloadProgress(-1, '')");
                 runJs("showToast('Мод установлен')");
-                refreshData();
+                refreshInstances();
                 loadMods("", instance.id);
             }
 
@@ -376,7 +371,7 @@ public class JavaBridge {
     }
 
     private boolean isCompatible(ModListing mod, InstanceInfo instance) {
-        GameVersion version = findVersion(resolveVersionId(instance, configManager.getSettings()));
+        GameVersion version = service.findVersion(service.resolveVersionId(instance));
         int[] parsed = version != null
                 ? GameVersionUtil.parse(version.id, version.name)
                 : new int[]{0, 0};
@@ -390,34 +385,16 @@ public class JavaBridge {
         return instanceManager.get(configManager.getSettings().selectedInstanceId);
     }
 
-    private Set<String> listInstalledModKeys(InstanceInfo instance) {
-        Set<String> keys = new HashSet<>();
-        Path modsDir = InstanceManager.dataDir(instance).resolve("mods");
-        if (!Files.isDirectory(modsDir)) return keys;
-        try (var stream = Files.list(modsDir)) {
-            stream.filter(path -> {
-                String name = path.getFileName().toString().toLowerCase();
-                return name.endsWith(".zip") || name.endsWith(".jar");
-            }).forEach(path -> keys.add(path.getFileName().toString().replaceFirst("(?i)\\.(zip|jar)$", "")));
-        } catch (Exception ignored) {}
-        return keys;
-    }
-
     private static String repoKey(String repo) {
         return repo.replace("/", "");
     }
 
-    private String resolveVersionId(InstanceInfo instance, LauncherSettings settings) {
-        if (instance.versionId != null && !instance.versionId.isBlank()) return instance.versionId;
-        return settings.selectedVersionId;
+    private GameVersion findVersion(String id) {
+        return service.findVersion(id);
     }
 
-    private GameVersion findVersion(String id) {
-        if (id == null) return null;
-        for (GameVersion version : versionDownloader.listAvailable()) {
-            if (version.id.equals(id)) return version;
-        }
-        return null;
+    private void refreshInstances() {
+        runJs("applyInstances(" + service.getInstancesPayload() + ")");
     }
 
     private void refreshData() {

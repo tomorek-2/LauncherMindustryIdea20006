@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application' version '8.5.2'
+}
+
+android {
+    namespace 'singlaunch.android'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'singlaunch.android'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.0.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            java {
+                srcDirs = ['src/main/java', '../../core/singlaunch']
+                exclude(
+                        '**/SingularityLauncher.java',
+                        '**/LauncherEntry.java',
+                        '**/LauncherWindow.java',
+                        '**/HyprlandSupport.java',
+                        '**/DesktopUtil.java',
+                        '**/JavaBridge.java',
+                        '**/GameLauncher.java',
+                        '**/OverlayDropdown.java',
+                        '**/ResourceLoader.java'
+                )
+            }
+            assets.srcDirs = ['../../assets']
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

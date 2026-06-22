@@ -5,25 +5,18 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.Duration;
+import java.util.Map;
 import java.util.function.DoubleConsumer;
 
 public class ModInstaller {
     private static final String GH_API = "https://api.github.com";
-
-    private final HttpClient client = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.ALWAYS)
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private static final Map<String, String> GH_HEADERS = Map.of(
+            "User-Agent", "SingularityLauncher",
+            "Accept", "application/vnd.github+json"
+    );
 
     public void installFromListing(ModListing listing, InstanceInfo instance, DoubleConsumer progress) throws IOException {
         if (listing == null || listing.repo == null || listing.repo.isBlank()) {
@@ -110,52 +103,14 @@ public class ModInstaller {
     }
 
     private Path downloadToTemp(String url, DoubleConsumer progress) throws IOException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .header("User-Agent", "SingularityLauncher")
-                .GET()
-                .build();
-        try {
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() >= 400) {
-                throw new IOException("HTTP " + response.statusCode() + " при загрузке мода");
-            }
-
-            Path temp = Files.createTempFile("singularity-mod-", ".download");
-            long total = response.headers().firstValueAsLong("Content-Length").orElse(-1);
-            try (InputStream in = response.body(); OutputStream out = Files.newOutputStream(temp)) {
-                byte[] buffer = new byte[8192];
-                long done = 0;
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
-                    done += read;
-                    if (progress != null && total > 0) progress.accept((double) done / total);
-                }
-            }
-            if (progress != null) progress.accept(1.0);
-            return temp;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Загрузка мода прервана", e);
-        }
+        Path temp = Files.createTempFile("singularity-mod-", ".download");
+        HttpUtil.download(url, temp, progress);
+        return temp;
     }
 
     private JsonObject apiGet(String path) throws IOException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(GH_API + path))
-                .header("User-Agent", "SingularityLauncher")
-                .header("Accept", "application/vnd.github+json")
-                .GET()
-                .build();
-        try {
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 400) {
-                throw new IOException("GitHub API: HTTP " + response.statusCode());
-            }
-            return JsonParser.parseString(response.body()).getAsJsonObject();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("GitHub API прерван", e);
-        }
+        String body = HttpUtil.getString(GH_API + path, GH_HEADERS);
+        return JsonParser.parseString(body).getAsJsonObject();
     }
 
     private static String normalizeRepo(String repo) {
