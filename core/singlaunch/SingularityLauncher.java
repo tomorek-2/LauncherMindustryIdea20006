@@ -128,7 +128,7 @@ public class SingularityLauncher extends ApplicationCore {
     private Font generateFont(int fontSize) {
         try {
             java.awt.Font awtFont = new java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize);
-            String chars = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+            String chars = " !\\\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
             int count = chars.length();
 
             // Create a dummy image to extract font metrics
@@ -167,7 +167,7 @@ public class SingularityLauncher extends ApplicationCore {
 
                 int cw = fm.charWidth(chars.charAt(i));
                 // Center the character horizontally within its cell
-                g.drawString(String.valueOf(chars.charAt(i)), x + (cellW - cw) / 2f, y + fm.getAscent() + 2);
+                g.drawString(String.valueOf(chars.charAt(i)), x + (cellW - cw) / 8f, y + fm.getAscent() + 2);
             }
             g.dispose();
 
@@ -205,7 +205,7 @@ public class SingularityLauncher extends ApplicationCore {
             }
 
             File fntFile = new File(tmpDir, "font_" + fontSize + ".fnt");
-            try (FileWriter fw = new FileWriter(fntFile)) {
+            try (FileWriter fw = new FileWriter(fntFile, java.nio.charset.StandardCharsets.UTF_8)) {
                 fw.write(fnt.toString());
             }
 
@@ -344,10 +344,11 @@ public class SingularityLauncher extends ApplicationCore {
 
             Log.info("Starting: " + jarPath);
             try {
-                new ProcessBuilder("java", "-jar", jarPath)
+                 new ProcessBuilder("java", "-jar", jarPath)
                         .inheritIO()
                         .start();
-               Core.app.exit();
+         Core.app.exit();
+
             } catch (IOException e) {
                 Log.err("Start failed: ", e);
             }
