@@ -74,17 +74,31 @@ public class JavaBridge {
     public void selectInstance(String id) {
         LauncherSettings settings = configManager.getSettings();
         settings.selectedInstanceId = id;
-        configManager.save();
         InstanceInfo instance = instanceManager.get(id);
-        runJs("onInstanceSelected(" + jsQuote(instance.name) + ")");
+        if (instance.versionId != null && !instance.versionId.isBlank()) {
+            settings.selectedVersionId = instance.versionId;
+        }
+        configManager.save();
+        runJs("onInstanceSelected(" + jsQuote(instance.name) + "," + jsQuote(settings.selectedVersionId) + ")");
         refreshInstances();
     }
 
     public void selectVersion(String id) {
+        setInstanceVersion(configManager.getSettings().selectedInstanceId, id);
+    }
+
+    public void setInstanceVersion(String instanceId, String versionId) {
+        if (instanceId == null || instanceId.isBlank() || versionId == null || versionId.isBlank()) return;
+        InstanceInfo instance = instanceManager.get(instanceId);
+        instance.versionId = versionId;
+        instanceManager.save(instance);
         LauncherSettings settings = configManager.getSettings();
-        settings.selectedVersionId = id;
+        if (instanceId.equals(settings.selectedInstanceId)) {
+            settings.selectedVersionId = versionId;
+        }
         configManager.save();
-        runJs("onVersionSelected(" + jsQuote(id) + ")");
+        runJs("onVersionSelected(" + jsQuote(versionId) + ")");
+        refreshInstances();
     }
 
     public void createInstance(String name, String versionId) {
@@ -192,9 +206,7 @@ public class JavaBridge {
         GameVersion version = findVersion(id);
         if (version == null) return;
 
-        LauncherSettings settings = configManager.getSettings();
-        settings.selectedVersionId = id;
-        configManager.save();
+        setInstanceVersion(configManager.getSettings().selectedInstanceId, id);
 
         Task<Void> task = new Task<>() {
             @Override

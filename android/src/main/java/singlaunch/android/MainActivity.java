@@ -3,7 +3,9 @@ package singlaunch.android;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -78,6 +80,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     void openApkInstall(File apk) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!getPackageManager().canRequestPackageInstalls()) {
+                Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName()));
+                settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(settingsIntent);
+                android.widget.Toast.makeText(this,
+                        "Разрешите установку из этого приложения", android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
         Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", apk);
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(uri, "application/vnd.android.package-archive");

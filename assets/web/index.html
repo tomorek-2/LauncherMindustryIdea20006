@@ -15,8 +15,9 @@
     --text-dim: #6a6a6a;
     --border: #3a3a3a;
     --danger: #ff7b7b;
+    --font: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font); scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
   *::-webkit-scrollbar { width: 5px; height: 5px; }
   *::-webkit-scrollbar-track { background: transparent; }
   *::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
@@ -25,7 +26,6 @@
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     min-height: 100vh;
     overflow: hidden;
     background-image:
@@ -54,14 +54,13 @@
     -webkit-app-region: drag;
   }
   .logo {
-    font-family: ui-monospace, monospace;
     font-weight: 700;
     font-size: 18px;
     letter-spacing: 0.14em;
     color: var(--accent);
   }
   .logo span { color: var(--text-dim); font-weight: 400; }
-  .version { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-dim); }
+  .version { font-size: 11px; color: var(--text-dim); }
   main {
     display: grid;
     grid-template-columns: 1fr 300px;
@@ -88,7 +87,7 @@
     text-transform: uppercase;
   }
   .card p, .card li { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
-  .card b { color: var(--text); }
+  .card b, .card code { color: var(--text); font-family: inherit; }
   .version-list {
     list-style: none;
     max-height: 180px;
@@ -137,7 +136,6 @@
     border: 2px solid var(--accent);
     color: var(--accent);
     padding: 12px 14px;
-    font-family: ui-monospace, monospace;
     font-weight: 700;
     font-size: 12px;
     letter-spacing: 0.12em;
@@ -155,7 +153,6 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-family: ui-monospace, monospace;
     font-size: 11px;
     color: var(--text-dim);
   }
@@ -211,6 +208,8 @@
     font-size: 13px;
     text-align: left;
     cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
   .custom-select-menu {
     display: none;
@@ -290,7 +289,6 @@
     border: 2px solid var(--accent);
     color: var(--accent);
     padding: 10px 18px;
-    font-family: ui-monospace, monospace;
     font-size: 12px;
     transition: transform 0.2s ease;
     z-index: 100;
@@ -505,7 +503,9 @@
           </div>
           <div class="field">
             <label>Версия игры инстанса</label>
-            <input type="text" id="modsGameVersion" readonly>
+            <div class="custom-select">
+              <button type="button" class="custom-select-trigger" id="modsVersionTrigger" onclick="openModsVersionPicker()">—</button>
+            </div>
           </div>
         </div>
         <div class="mods-toolbar">
@@ -534,12 +534,36 @@
     let modsState = { mods: [], instanceId: '', gameVersionLabel: '' };
     let modsSearchTimer;
     let newInstanceVersionId = '';
+    let pickerTargetInstanceId = '';
+
+    function getSelectedInstance() {
+      const settings = state.settings || {};
+      return (state.instances || []).find(i => i.id === settings.selectedInstanceId) || (state.instances || [])[0];
+    }
+
+    function resolveInstanceVersionId(instance) {
+      if (!instance) return (state.settings || {}).selectedVersionId;
+      if (instance.versionId) return instance.versionId;
+      return (state.settings || {}).selectedVersionId;
+    }
+
+    function resolveActiveVersionId() {
+      return resolveInstanceVersionId(getSelectedInstance());
+    }
+
+    function versionNameById(id) {
+      const v = (state.versions || []).find(x => x.id === id);
+      return v ? v.name : (id || '—');
+    }
 
     function openVersionPicker(mode) {
-      const trigger = document.getElementById(mode === 'new' ? 'newInstanceVersionTrigger' : 'newInstanceVersionTrigger');
+      const trigger = document.getElementById('newInstanceVersionTrigger');
+      if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
-      const selectedId = mode === 'new' ? (newInstanceVersionId || state.settings.selectedVersionId) : state.settings.selectedVersionId;
+      const selectedId = mode === 'new' ? (newInstanceVersionId || resolveActiveVersionId()) : resolveActiveVersionId();
       const items = (state.versions || []).map(v => ({ id: v.id, label: v.name }));
+      if (!items.length) { showToast('Список версий пуст'); return; }
+      pickerTargetInstanceId = '';
       javaApp.openPicker(JSON.stringify(items), selectedId || '', rect.left, rect.bottom, 'onVersionPicked');
     }
 
@@ -551,16 +575,54 @@
 
     function openInstancePicker() {
       const trigger = document.getElementById('modsInstanceTrigger');
+      if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const selectedId = modsState.instanceId || state.settings.selectedInstanceId;
       const items = (state.instances || []).map(i => ({ id: i.id, label: i.name }));
+      if (!items.length) { showToast('Нет инстансов'); return; }
       javaApp.openPicker(JSON.stringify(items), selectedId || '', rect.left, rect.bottom, 'onModsInstancePicked');
+    }
+
+    function openModsVersionPicker() {
+      const trigger = document.getElementById('modsVersionTrigger');
+      if (!trigger) return;
+      pickerTargetInstanceId = modsState.instanceId || state.settings.selectedInstanceId;
+      openInstanceVersionPicker(pickerTargetInstanceId, trigger);
+    }
+
+    function openInstanceVersionPicker(instanceId, triggerEl) {
+      if (!triggerEl) return;
+      pickerTargetInstanceId = instanceId;
+      const inst = (state.instances || []).find(i => i.id === instanceId);
+      const selectedId = resolveInstanceVersionId(inst);
+      const items = (state.versions || []).map(v => ({ id: v.id, label: v.name }));
+      if (!items.length) { showToast('Список версий пуст'); return; }
+      const rect = triggerEl.getBoundingClientRect();
+      javaApp.openPicker(JSON.stringify(items), selectedId || '', rect.left, rect.bottom, 'onInstanceVersionPicked');
+    }
+
+    function onInstanceVersionPicked(id) {
+      const instanceId = pickerTargetInstanceId || state.settings.selectedInstanceId;
+      javaApp.setInstanceVersion(instanceId, id);
+      const inst = (state.instances || []).find(i => i.id === instanceId);
+      if (inst) inst.versionId = id;
+      if (instanceId === state.settings.selectedInstanceId) {
+        state.settings.selectedVersionId = id;
+      }
+      updateModsVersionTrigger();
+      renderVersionListOnly();
+      renderInstancesOnly();
+      if (document.getElementById('modsOverlay').classList.contains('open') && modsState.mods && modsState.mods.length) {
+        renderModList();
+      }
+      showToast('Версия: ' + versionNameById(id));
     }
 
     function onModsInstancePicked(id) {
       modsState.instanceId = id;
       const inst = (state.instances || []).find(i => i.id === id);
       document.getElementById('modsInstanceTrigger').textContent = inst ? inst.name : id;
+      updateModsVersionTrigger();
       if (modsState.mods && modsState.mods.length) renderModList();
       javaApp.loadMods(document.getElementById('modsSearch').value || '', id);
     }
@@ -594,8 +656,9 @@
       const settings = state.settings || {};
       const instances = state.instances || [];
       const versions = state.versions || [];
-      const selectedInstance = instances.find(i => i.id === settings.selectedInstanceId) || instances[0];
-      const selectedVersion = versions.find(v => v.id === settings.selectedVersionId) || versions[0];
+      const selectedInstance = getSelectedInstance();
+      const activeVersionId = resolveActiveVersionId();
+      const selectedVersion = versions.find(v => v.id === activeVersionId) || versions[0];
 
       document.getElementById('headerInfo').textContent =
         (selectedInstance ? selectedInstance.name : '—') + ' · ' + (selectedVersion ? selectedVersion.name : '—');
@@ -608,13 +671,16 @@
       if (instanceList) {
         instanceList.innerHTML = '';
         instances.forEach(inst => {
+          const instVersionId = resolveInstanceVersionId(inst);
+          const instVersionName = versionNameById(instVersionId);
           const row = document.createElement('div');
           row.className = 'instance-item' + (settings.selectedInstanceId === inst.id ? ' selected' : '');
           row.innerHTML =
             '<div><div class="name">' + escapeHtml(inst.name) + '</div><div class="meta">' + escapeHtml(inst.dataPath || inst.id) + '</div></div>' +
             '<div class="instance-actions">' +
-              '<button class="btn-sm" onclick="selectInstance(\'' + escapeAttr(inst.id) + '\')">Выбрать</button>' +
-              (instances.length > 1 ? '<button class="btn-sm danger" onclick="deleteInstance(\'' + escapeAttr(inst.id) + '\')">Удалить</button>' : '') +
+              '<button type="button" class="btn-sm" onclick="selectInstance(\'' + escapeAttr(inst.id) + '\')">Выбрать</button>' +
+              '<button type="button" class="btn-sm" onclick="openInstanceVersionPicker(\'' + escapeAttr(inst.id) + '\', this)">' + escapeHtml(instVersionName) + '</button>' +
+              (instances.length > 1 ? '<button type="button" class="btn-sm danger" onclick="deleteInstance(\'' + escapeAttr(inst.id) + '\')">Удалить</button>' : '') +
             '</div>';
           instanceList.appendChild(row);
         });
@@ -622,14 +688,14 @@
 
       updateVersionTrigger();
       renderModsInstanceSelect();
+      updateModsVersionTrigger();
     }
 
     function renderAll() {
       const settings = state.settings || {};
-      const instances = state.instances || [];
       const versions = state.versions || [];
-      const selectedInstance = instances.find(i => i.id === settings.selectedInstanceId) || instances[0];
-      const selectedVersion = versions.find(v => v.id === settings.selectedVersionId) || versions[0];
+      const activeVersionId = resolveActiveVersionId();
+      const selectedVersion = versions.find(v => v.id === activeVersionId) || versions[0];
 
       document.getElementById('footerPath').textContent = state.launcherDir || '—';
 
@@ -741,12 +807,15 @@
     }
 
     function instanceGameVersion(instance) {
-      if (!instance) return [0, 0];
-      const versionId = (instance.versionId && instance.versionId.trim())
-        ? instance.versionId
-        : (state.settings || {}).selectedVersionId;
+      const versionId = resolveInstanceVersionId(instance);
       const v = (state.versions || []).find(x => x.id === versionId);
       return parseGameVersion(v ? v.id : '', v ? v.name : '');
+    }
+
+    function updateModsVersionTrigger() {
+      const instance = resolveModsInstance();
+      const trigger = document.getElementById('modsVersionTrigger');
+      if (trigger) trigger.textContent = versionNameById(resolveInstanceVersionId(instance));
     }
 
     function renderModList() {
@@ -758,7 +827,7 @@
       document.getElementById('modsSummary').textContent =
         'Инстанс: ' + (instance ? instance.name : '—') + ' · Версия: ' + versionLabel +
         ' · Показано модов: ' + mods.length;
-      document.getElementById('modsGameVersion').value = versionLabel;
+      updateModsVersionTrigger();
       renderModsInstanceSelect();
 
       const list = document.getElementById('modList');
@@ -791,9 +860,12 @@
     }
 
     function selectVersionOnly(id) {
+      javaApp.setInstanceVersion(state.settings.selectedInstanceId, id);
+      const inst = getSelectedInstance();
+      if (inst) inst.versionId = id;
       state.settings.selectedVersionId = id;
-      javaApp.selectVersion(id);
       renderVersionListOnly();
+      renderInstancesOnly();
     }
 
     function downloadVersionOnly(id) {
@@ -804,14 +876,18 @@
       if (typeof versions === 'string') versions = JSON.parse(versions);
       state.versions = versions || state.versions;
       state.settings.selectedVersionId = id;
+      const inst = getSelectedInstance();
+      if (inst) inst.versionId = id;
       renderVersionListOnly();
+      renderInstancesOnly();
       showToast('Версия загружена');
     }
 
     function renderVersionListOnly() {
       const settings = state.settings || {};
       const versions = state.versions || [];
-      const selectedVersion = versions.find(v => v.id === settings.selectedVersionId) || versions[0];
+      const activeVersionId = resolveActiveVersionId();
+      const selectedVersion = versions.find(v => v.id === activeVersionId) || versions[0];
       const versionList = document.getElementById('versionList');
       if (!versionList) return;
       versionList.innerHTML = '';
@@ -905,10 +981,20 @@
     }
 
     function onSettingsSaved() { showToast('Настройки сохранены'); }
-    function onInstanceSelected(name) { showToast('Инстанс: ' + name); }
-    function onVersionSelected(id) {
-      if (id) state.settings.selectedVersionId = id;
+    function onInstanceSelected(name, versionId) {
+      if (versionId) state.settings.selectedVersionId = versionId;
+      showToast('Инстанс: ' + name);
       renderVersionListOnly();
+      renderInstancesOnly();
+    }
+    function onVersionSelected(id) {
+      if (id) {
+        state.settings.selectedVersionId = id;
+        const inst = getSelectedInstance();
+        if (inst) inst.versionId = id;
+      }
+      renderVersionListOnly();
+      renderInstancesOnly();
     }
 
     function setStatus(text) {

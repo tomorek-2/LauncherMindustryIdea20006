@@ -73,8 +73,7 @@ public class VersionDownloader {
         versions.addAll(fetchRemote());
         dedupe(versions);
         for (GameVersion version : versions) {
-            version.cached = jarPath(version).toFile().exists();
-            if (version.cached) version.sizeBytes = jarPath(version).toFile().length();
+            applyCacheFlag(version);
         }
         versions.sort(Comparator.comparingInt(VersionDownloader::versionSortKey).reversed());
         return versions;
@@ -82,8 +81,28 @@ public class VersionDownloader {
 
     private void updateCacheFlags(List<GameVersion> versions) {
         for (GameVersion version : versions) {
-            version.cached = jarPath(version).toFile().exists();
-            if (version.cached) version.sizeBytes = jarPath(version).toFile().length();
+            applyCacheFlag(version);
+        }
+    }
+
+    private void applyCacheFlag(GameVersion version) {
+        version.cached = isCached(version);
+        if (version.cached) {
+            try {
+                Path jar = jarPath(version);
+                if (Files.exists(jar)) version.sizeBytes = Files.size(jar);
+            } catch (IOException ignored) {}
+        }
+    }
+
+    private boolean isCached(GameVersion version) {
+        try {
+            Path apk = apkPath(version);
+            if (Files.exists(apk) && Files.size(apk) > 0) return true;
+            Path jar = jarPath(version);
+            return Files.exists(jar) && Files.size(jar) > 0;
+        } catch (IOException e) {
+            return false;
         }
     }
 

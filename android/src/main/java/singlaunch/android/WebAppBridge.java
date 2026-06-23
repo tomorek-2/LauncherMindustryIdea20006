@@ -83,16 +83,33 @@ public class WebAppBridge {
     public void selectInstance(String id) {
         LauncherSettings settings = configManager.getSettings();
         settings.selectedInstanceId = id;
+        InstanceInfo instance = instanceManager.get(id);
+        if (instance.versionId != null && !instance.versionId.isBlank()) {
+            settings.selectedVersionId = instance.versionId;
+        }
         configManager.save();
+        runJs("onInstanceSelected('" + escapeJs(instance.name) + "','" + escapeJs(settings.selectedVersionId) + "')");
         refreshInstances();
     }
 
     @JavascriptInterface
     public void selectVersion(String id) {
+        setInstanceVersion(configManager.getSettings().selectedInstanceId, id);
+    }
+
+    @JavascriptInterface
+    public void setInstanceVersion(String instanceId, String versionId) {
+        if (instanceId == null || instanceId.isBlank() || versionId == null || versionId.isBlank()) return;
+        InstanceInfo instance = instanceManager.get(instanceId);
+        instance.versionId = versionId;
+        instanceManager.save(instance);
         LauncherSettings settings = configManager.getSettings();
-        settings.selectedVersionId = id;
+        if (instanceId.equals(settings.selectedInstanceId)) {
+            settings.selectedVersionId = versionId;
+        }
         configManager.save();
-        runJs("onVersionSelected('" + escapeJs(id) + "')");
+        runJs("onVersionSelected('" + escapeJs(versionId) + "')");
+        refreshInstances();
     }
 
     @JavascriptInterface
@@ -154,17 +171,16 @@ public class WebAppBridge {
             toast("Версия не выбрана");
             return;
         }
+        if (version.apkUrl == null || version.apkUrl.isBlank()) {
+            toast("Нет APK для версии " + version.name);
+            return;
+        }
 
         new Thread(() -> {
             try {
                 runJs("setDownloadProgress(0, 'Загрузка...')");
-                if (version.apkUrl != null && !version.apkUrl.isBlank()) {
-                    versionDownloader.ensureApkDownloaded(version, p ->
-                            runJs("setDownloadProgress(" + p + ", 'Загрузка APK...')"));
-                } else {
-                    versionDownloader.ensureDownloaded(version, p ->
-                            runJs("setDownloadProgress(" + p + ", 'Загрузка...')"));
-                }
+                versionDownloader.ensureApkDownloaded(version, p ->
+                        runJs("setDownloadProgress(" + p + ", 'Загрузка APK...')"));
                 runJs("setDownloadProgress(1, 'Запуск...')");
                 activity.runOnUiThread(() -> launchMindustry(version));
                 runJs("setDownloadProgress(-1, '')");
@@ -179,9 +195,7 @@ public class WebAppBridge {
     public void downloadVersion(String id) {
         GameVersion version = service.findVersion(id);
         if (version == null) return;
-        LauncherSettings settings = configManager.getSettings();
-        settings.selectedVersionId = id;
-        configManager.save();
+        setInstanceVersion(configManager.getSettings().selectedInstanceId, id);
         new Thread(() -> {
             try {
                 runJs("setDownloadProgress(0, 'Загрузка...')");
@@ -272,6 +286,15 @@ public class WebAppBridge {
     public void exit() { activity.finish(); }
 
     private void launchMindustry(GameVersion version) {
+        try {
+            File apk = versionDownloader.apkPath(version).toFile();
+            if (apk.exists() && apk.length() > 0) {
+                activity.openApkInstall(apk);
+                toast("Установка " + version.name);
+                return;
+            }
+        } catch (Exception ignored) {}
+
         for (String pkg : MINDUSTRY_PACKAGES) {
             Intent launch = activity.getPackageManager().getLaunchIntentForPackage(pkg);
             if (launch != null) {
@@ -281,17 +304,7 @@ public class WebAppBridge {
                 return;
             }
         }
-        try {
-            File apk = versionDownloader.apkPath(version).toFile();
-            if (apk.exists()) {
-                activity.openApkInstall(apk);
-                toast("Установите Mindustry APK");
-            } else {
-                toast("Mindustry не установлен");
-            }
-        } catch (Exception e) {
-            toast("Не удалось открыть APK");
-        }
+        toast("APK не найден — скачайте версию ещё раз");
     }
 
     private String buildModsPayload(String query, String instanceId) throws Exception {
