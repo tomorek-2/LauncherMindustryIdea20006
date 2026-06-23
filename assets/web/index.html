@@ -123,6 +123,7 @@
     min-height: 28px;
   }
   .version-dl:active { background: var(--bg-3); }
+  .version-dl:disabled { opacity: 0.4; cursor: not-allowed; }
   .version-name { flex: 1; min-width: 0; }
   .menu {
     padding: 20px 16px;
@@ -280,6 +281,19 @@
   .mod-actions { display: flex; flex-direction: column; gap: 6px; }
   .mods-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
   .mods-summary { font-size: 12px; color: var(--text-dim); }
+  .log-view {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.45;
+    padding: 10px;
+    height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .log-toolbar { display: flex; gap: 8px; justify-content: flex-end; }
   .toast {
     position: fixed;
     bottom: 24px;
@@ -416,6 +430,7 @@
         <button class="btn" onclick="javaApp.settings()">НАСТРОЙКИ</button>
         <button class="btn" onclick="javaApp.mods()">МОДЫ</button>
         <button class="btn" onclick="javaApp.openModsFolder()">ПАПКА МОДОВ</button>
+        <button class="btn" onclick="javaApp.logs()">ЛОГИ</button>
         <button class="btn" onclick="javaApp.openInstanceFolder()">ДАННЫЕ ИНСТАНСА</button>
         <button class="btn" onclick="javaApp.exit()">ВЫХОД</button>
       </nav>
@@ -523,6 +538,22 @@
           </div>
         </div>
         <button class="btn" onclick="javaApp.openModsFolder()">ОТКРЫТЬ ПАПКУ МОДОВ ИНСТАНСА</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="logsOverlay">
+    <div class="panel">
+      <div class="panel-header">
+        <strong>Логи</strong>
+        <button type="button" class="btn-sm" onclick="closePanel('logs')">Закрыть</button>
+      </div>
+      <div class="panel-body">
+        <div class="log-toolbar">
+          <button type="button" class="btn-sm" onclick="loadLogs()">Обновить</button>
+          <button type="button" class="btn-sm" onclick="javaApp.clearLogs()">Очистить</button>
+        </div>
+        <div class="log-view" id="logView"></div>
       </div>
     </div>
   </div>
@@ -691,6 +722,43 @@
       updateModsVersionTrigger();
     }
 
+    function versionHasApk(v) {
+      return !!(v && v.apkUrl && String(v.apkUrl).trim());
+    }
+
+    function isAndroidClient() {
+      return document.body.classList.contains('android');
+    }
+
+    function cacheLabel() {
+      return isAndroidClient() ? 'apk' : 'кэш';
+    }
+
+    function fillVersionList(container, versions, selectedVersion) {
+      if (!container) return;
+      container.innerHTML = '';
+      versions.forEach(v => {
+        const li = document.createElement('li');
+        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
+        if (v.cached) {
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><span class="tag cached">' + cacheLabel() + '</span>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+        } else {
+          const noApk = isAndroidClient() && !versionHasApk(v);
+          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><button type="button" class="version-dl"' + (noApk ? ' disabled' : '') + '>СКАЧАТЬ</button>';
+          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
+          if (!noApk) {
+            li.querySelector('.version-dl').onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              downloadVersionOnly(v.id);
+            };
+          }
+        }
+        container.appendChild(li);
+      });
+    }
+
     function renderAll() {
       const settings = state.settings || {};
       const versions = state.versions || [];
@@ -698,26 +766,7 @@
       const selectedVersion = versions.find(v => v.id === activeVersionId) || versions[0];
 
       document.getElementById('footerPath').textContent = state.launcherDir || '—';
-
-      const versionList = document.getElementById('versionList');
-      versionList.innerHTML = '';
-      versions.forEach(v => {
-        const li = document.createElement('li');
-        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
-        if (v.cached) {
-          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><span class="tag cached">кэш</span>';
-          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
-        } else {
-          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><button type="button" class="version-dl">СКАЧАТЬ</button>';
-          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
-          li.querySelector('.version-dl').onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            downloadVersionOnly(v.id);
-          };
-        }
-        versionList.appendChild(li);
-      });
+      fillVersionList(document.getElementById('versionList'), versions, selectedVersion);
 
       document.getElementById('minMemory').value = settings.minMemoryMb || 512;
       document.getElementById('maxMemory').value = settings.maxMemoryMb || 2048;
@@ -888,26 +937,7 @@
       const versions = state.versions || [];
       const activeVersionId = resolveActiveVersionId();
       const selectedVersion = versions.find(v => v.id === activeVersionId) || versions[0];
-      const versionList = document.getElementById('versionList');
-      if (!versionList) return;
-      versionList.innerHTML = '';
-      versions.forEach(v => {
-        const li = document.createElement('li');
-        li.className = 'version-item' + (selectedVersion && v.id === selectedVersion.id ? ' selected' : '');
-        if (v.cached) {
-          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><span class="tag cached">кэш</span>';
-          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
-        } else {
-          li.innerHTML = '<span class="version-name">' + escapeHtml(v.name) + '</span><button type="button" class="version-dl">СКАЧАТЬ</button>';
-          li.querySelector('.version-name').onclick = () => selectVersionOnly(v.id);
-          li.querySelector('.version-dl').onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            downloadVersionOnly(v.id);
-          };
-        }
-        versionList.appendChild(li);
-      });
+      fillVersionList(document.getElementById('versionList'), versions, selectedVersion);
       const selectedInstance = (state.instances || []).find(i => i.id === settings.selectedInstanceId) || (state.instances || [])[0];
       const selectedVersionName = selectedVersion ? selectedVersion.name : '—';
       document.getElementById('headerInfo').textContent =
@@ -974,10 +1004,36 @@
         const instanceId = modsState.instanceId || state.settings.selectedInstanceId;
         javaApp.loadMods(document.getElementById('modsSearch')?.value || '', instanceId);
       }
+      if (name === 'logs') loadLogs();
     }
 
     function closePanel(name) {
       document.getElementById(name + 'Overlay').classList.remove('open');
+    }
+
+    function loadLogs() {
+      const view = document.getElementById('logView');
+      if (!view) return;
+      try {
+        view.textContent = javaApp.getLogs() || '';
+      } catch (e) {
+        view.textContent = '';
+      }
+      view.scrollTop = view.scrollHeight;
+    }
+
+    function appendLog(line) {
+      const view = document.getElementById('logView');
+      if (!view) return;
+      view.textContent += (view.textContent ? '\n' : '') + line;
+      if (document.getElementById('logsOverlay').classList.contains('open')) {
+        view.scrollTop = view.scrollHeight;
+      }
+    }
+
+    function clearLogView() {
+      const view = document.getElementById('logView');
+      if (view) view.textContent = '';
     }
 
     function onSettingsSaved() { showToast('Настройки сохранены'); }

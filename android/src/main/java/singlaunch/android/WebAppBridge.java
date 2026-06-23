@@ -23,6 +23,7 @@ import singlaunch.ConfigManager;
 import singlaunch.GameVersion;
 import singlaunch.InstanceInfo;
 import singlaunch.InstanceManager;
+import singlaunch.LauncherLog;
 import singlaunch.LauncherService;
 import singlaunch.LauncherSettings;
 import singlaunch.ModBrowserService;
@@ -55,6 +56,8 @@ public class WebAppBridge {
     }
 
     void onPageReady() {
+        LauncherLog.setSink(line -> runJs("appendLog('" + escapeJs(line) + "')"));
+        LauncherLog.info("Singularity Launcher (Android)");
         runJs("document.body.classList.add('android','mobile')");
         runJs("applyBootstrap(" + getBootstrapDataFast() + ")");
         versionDownloader.refreshAsync(() -> runJs("applyVersions(" + GSON.toJson(versionDownloader.listAvailable()) + ")"));
@@ -166,19 +169,26 @@ public class WebAppBridge {
     public void play() {
         LauncherSettings settings = configManager.getSettings();
         InstanceInfo instance = instanceManager.get(settings.selectedInstanceId);
-        GameVersion version = service.findVersion(service.resolveVersionId(instance));
+        String versionId = service.resolveVersionId(instance);
+        GameVersion version = service.findVersion(versionId);
         if (version == null) {
+            LauncherLog.error("Версия не найдена: " + versionId);
             toast("Версия не выбрана");
             return;
         }
-        if (version.apkUrl == null || version.apkUrl.isBlank()) {
-            toast("Нет APK для версии " + version.name);
-            return;
-        }
+
+        LauncherLog.info("Играть: инстанс=" + instance.name + ", версия=" + version.name);
 
         new Thread(() -> {
             try {
                 runJs("setDownloadProgress(0, 'Загрузка...')");
+                versionDownloader.ensureApkUrl(version);
+                if (!version.hasApk()) {
+                    LauncherLog.error("Нет APK для " + version.name + " — старые релизы без APK недоступны на Android");
+                    toast("Нет APK для версии " + version.name);
+                    runJs("setDownloadProgress(-1, '')");
+                    return;
+                }
                 versionDownloader.ensureApkDownloaded(version, p ->
                         runJs("setDownloadProgress(" + p + ", 'Загрузка APK...')"));
                 runJs("setDownloadProgress(1, 'Запуск...')");
@@ -186,6 +196,7 @@ public class WebAppBridge {
                 runJs("setDownloadProgress(-1, '')");
             } catch (Exception e) {
                 runJs("setDownloadProgress(-1, '')");
+                LauncherLog.error("Ошибка запуска", e);
                 toast(e.getMessage() != null ? e.getMessage() : "Ошибка запуска");
             }
         }, "game-launch").start();
@@ -199,19 +210,23 @@ public class WebAppBridge {
         new Thread(() -> {
             try {
                 runJs("setDownloadProgress(0, 'Загрузка...')");
-                if (version.apkUrl != null && !version.apkUrl.isBlank()) {
-                    versionDownloader.ensureApkDownloaded(version, p ->
-                            runJs("setDownloadProgress(" + p + ", 'Загрузка...')"));
-                } else {
-                    versionDownloader.ensureDownloaded(version, p ->
-                            runJs("setDownloadProgress(" + p + ", 'Загрузка...')"));
+                versionDownloader.ensureApkUrl(version);
+                if (!version.hasApk()) {
+                    LauncherLog.error("Нет APK для " + version.name);
+                    toast("Нет APK для версии " + version.name);
+                    runJs("setDownloadProgress(-1, '')");
+                    return;
                 }
+                versionDownloader.ensureApkDownloaded(version, p ->
+                        runJs("setDownloadProgress(" + p + ", 'Загрузка APK...')"));
                 runJs("setDownloadProgress(-1, '')");
                 versionDownloader.invalidateCache();
                 String versionsJson = GSON.toJson(versionDownloader.listAvailable());
                 runJs("onVersionDownloaded('" + escapeJs(id) + "'," + versionsJson + ")");
+                toast("APK загружен");
             } catch (Exception e) {
                 runJs("setDownloadProgress(-1, '')");
+                LauncherLog.error("Ошибка загрузки APK", e);
                 toast("Ошибка загрузки");
             }
         }, "version-download").start();
@@ -282,6 +297,15 @@ public class WebAppBridge {
     public void instances() { runJs("openPanel('instances')"); }
     @JavascriptInterface
     public void mods() { runJs("openPanel('mods')"); loadMods(""); }
+    @JavascriptInterface
+    public void logs() { runJs("openPanel('logs')"); }
+    @JavascriptInterface
+    public String getLogs() { return LauncherLog.dump(); }
+    @JavascriptInterface
+    public void clearLogs() {
+        LauncherLog.clear();
+        runJs("clearLogView()");
+    }
     @JavascriptInterface
     public void exit() { activity.finish(); }
 

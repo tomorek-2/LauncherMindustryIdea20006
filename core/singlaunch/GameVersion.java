@@ -17,4 +17,8 @@ public class GameVersion {
         this.downloadUrl = downloadUrl;
         this.source = source;
     }
+
+    public boolean hasApk() {
+        return apkUrl != null && !apkUrl.isBlank();
+    }
 }

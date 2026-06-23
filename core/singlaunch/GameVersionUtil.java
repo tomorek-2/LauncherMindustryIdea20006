@@ -41,6 +41,14 @@ public final class GameVersionUtil {
         return revision == 0 ? String.valueOf(build) : build + "." + revision;
     }
 
+    public static String normalizeTag(String id) {
+        if (id == null) return "";
+        String tag = id.trim().toLowerCase();
+        if (tag.startsWith("local-")) tag = tag.substring(6);
+        if (tag.startsWith("v")) tag = tag.substring(1);
+        return tag;
+    }
+
     private static int parseInt(String value) {
         try {
             return Integer.parseInt(value.trim());

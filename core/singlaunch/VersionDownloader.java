@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -108,22 +109,32 @@ public class VersionDownloader {
 
     public Path apkPath(GameVersion version) {
         if ("local".equals(version.source)) {
-            return Path.of(version.downloadUrl);
+            return Paths.get(version.downloadUrl);
         }
         return LauncherPaths.versionsCacheDir().resolve(version.id).resolve("Mindustry.apk");
     }
 
     public Path ensureApkDownloaded(GameVersion version, DoubleConsumer progress) throws IOException {
+        ensureApkUrl(version);
         if (version.apkUrl == null || version.apkUrl.isBlank()) {
-            throw new IOException("Нет APK для версии " + version.id);
+            throw new IOException("Нет APK для версии " + version.name + " — на Android доступны только релизы с APK");
         }
         Path target = apkPath(version);
         if (Files.exists(target) && Files.size(target) > 0) {
             if (progress != null) progress.accept(1.0);
+            LauncherLog.info("APK уже в кэше: " + target);
             return target;
         }
+        LauncherLog.info("Скачивание APK " + version.name + " → " + target);
+        LauncherLog.info("URL: " + version.apkUrl);
         HttpUtil.download(version.apkUrl, target, progress);
+        LauncherLog.info("APK загружен: " + Files.size(target) + " байт");
         return target;
+    }
+
+    public void ensureApkUrl(GameVersion version) throws IOException {
+        if (version.hasApk()) return;
+        resolveReleaseAssets(version);
     }
 
     public Path ensureDownloaded(GameVersion version, DoubleConsumer progress) throws IOException {
@@ -135,13 +146,16 @@ public class VersionDownloader {
         if (version.downloadUrl == null || version.downloadUrl.isBlank()) {
             throw new IOException("Нет URL для версии " + version.id);
         }
+        LauncherLog.info("Скачивание JAR " + version.name + " → " + target);
+        LauncherLog.info("URL: " + version.downloadUrl);
         HttpUtil.download(version.downloadUrl, target, progress);
+        LauncherLog.info("JAR загружен: " + Files.size(target) + " байт");
         return target;
     }
 
     public Path jarPath(GameVersion version) {
         if ("local".equals(version.source)) {
-            return Path.of(version.downloadUrl);
+            return Paths.get(version.downloadUrl);
         }
         return LauncherPaths.versionsCacheDir().resolve(version.id).resolve("Mindustry.jar");
     }
@@ -182,11 +196,15 @@ public class VersionDownloader {
                     for (JsonElement assetEl : assets) {
                         JsonObject asset = assetEl.getAsJsonObject();
                         String assetName = asset.get("name").getAsString();
-                        if ("Mindustry.jar".equals(assetName)) {
-                            jarUrl = asset.get("browser_download_url").getAsString();
+                        String assetUrl = asset.get("browser_download_url").getAsString();
+                        String lower = assetName.toLowerCase();
+                        if ("mindustry.jar".equalsIgnoreCase(assetName)) {
+                            jarUrl = assetUrl;
                             jarSize = asset.get("size").getAsLong();
-                        } else if (assetName.endsWith(".apk")) {
-                            apkUrl = asset.get("browser_download_url").getAsString();
+                        } else if (lower.endsWith(".apk") && !lower.contains("sources") && !lower.contains("debug")) {
+                            if (apkUrl == null || lower.contains("mindustry")) {
+                                apkUrl = assetUrl;
+                            }
                         }
                     }
                     if (jarUrl != null) {
@@ -220,18 +238,92 @@ public class VersionDownloader {
     }
 
     private void dedupe(List<GameVersion> versions) {
-        List<GameVersion> filtered = new ArrayList<>();
+        List<GameVersion> merged = new ArrayList<>();
         for (GameVersion version : versions) {
-            boolean exists = false;
-            for (GameVersion kept : filtered) {
-                if (kept.id.equals(version.id) || kept.name.equals(version.name)) {
-                    exists = true;
+            GameVersion match = null;
+            for (GameVersion kept : merged) {
+                if (sameVersion(kept, version)) {
+                    match = kept;
                     break;
                 }
             }
-            if (!exists) filtered.add(version);
+            if (match == null) {
+                merged.add(version);
+            } else {
+                mergeInto(match, version);
+            }
         }
         versions.clear();
-        versions.addAll(filtered);
+        versions.addAll(merged);
+    }
+
+    private static boolean sameVersion(GameVersion a, GameVersion b) {
+        if (a.id != null && a.id.equals(b.id)) return true;
+        if (a.name != null && a.name.equals(b.name)) return true;
+        return normalizeTag(a.id).equals(normalizeTag(b.id));
+    }
+
+    private static void mergeInto(GameVersion keep, GameVersion other) {
+        if ((keep.downloadUrl == null || keep.downloadUrl.isBlank()) && other.downloadUrl != null && !other.downloadUrl.isBlank()) {
+            keep.downloadUrl = other.downloadUrl;
+        }
+        if (!keep.hasApk() && other.hasApk()) {
+            keep.apkUrl = other.apkUrl;
+        }
+        if ("remote".equals(other.source) && "local".equals(keep.source)) {
+            if (other.downloadUrl != null && !other.downloadUrl.isBlank()) keep.downloadUrl = other.downloadUrl;
+            if (other.hasApk()) keep.apkUrl = other.apkUrl;
+        }
+        if (keep.sizeBytes <= 0 && other.sizeBytes > 0) keep.sizeBytes = other.sizeBytes;
+    }
+
+    private static String normalizeTag(String id) {
+        return GameVersionUtil.normalizeTag(id);
+    }
+
+    public void resolveReleaseAssets(GameVersion version) throws IOException {
+        for (String tag : releaseTagCandidates(version.id)) {
+            try {
+                String url = RELEASES_API + "/tags/" + tag;
+                String body = HttpUtil.getString(url, GH_HEADERS);
+                JsonObject release = JsonParser.parseString(body).getAsJsonObject();
+                parseAssetsInto(version, release.getAsJsonArray("assets"));
+                if (version.hasApk() || (version.downloadUrl != null && !version.downloadUrl.isBlank())) {
+                    LauncherLog.info("Метаданные релиза " + tag + ": jar=" + (version.downloadUrl != null) + ", apk=" + version.hasApk());
+                    return;
+                }
+            } catch (IOException ignored) {}
+        }
+    }
+
+    private static List<String> releaseTagCandidates(String id) {
+        List<String> tags = new ArrayList<>();
+        if (id == null || id.isBlank()) return tags;
+        String raw = id.startsWith("local-") ? id.substring(6) : id;
+        tags.add(raw);
+        if (!raw.startsWith("v")) tags.add("v" + raw);
+        if (raw.startsWith("v")) tags.add(raw.substring(1));
+        return tags;
+    }
+
+    private static void parseAssetsInto(GameVersion version, JsonArray assets) {
+        String jarUrl = version.downloadUrl;
+        String apkUrl = version.apkUrl;
+        long jarSize = version.sizeBytes;
+        for (JsonElement assetEl : assets) {
+            JsonObject asset = assetEl.getAsJsonObject();
+            String assetName = asset.get("name").getAsString();
+            String assetUrl = asset.get("browser_download_url").getAsString();
+            String lower = assetName.toLowerCase();
+            if ("mindustry.jar".equalsIgnoreCase(assetName)) {
+                jarUrl = assetUrl;
+                jarSize = asset.get("size").getAsLong();
+            } else if (lower.endsWith(".apk") && !lower.contains("sources") && !lower.contains("debug")) {
+                if (apkUrl == null || lower.contains("mindustry")) apkUrl = assetUrl;
+            }
+        }
+        if (jarUrl != null && !jarUrl.isBlank()) version.downloadUrl = jarUrl;
+        if (apkUrl != null && !apkUrl.isBlank()) version.apkUrl = apkUrl;
+        if (jarSize > 0) version.sizeBytes = jarSize;
     }
 }

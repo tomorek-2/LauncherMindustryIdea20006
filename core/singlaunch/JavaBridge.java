@@ -48,6 +48,8 @@ public class JavaBridge {
         this.webView = webView;
         this.status = status;
         this.launcherWindow = launcherWindow;
+        LauncherLog.setSink(line -> runJs("appendLog(" + jsQuote(line) + ")"));
+        LauncherLog.info("Singularity Launcher (desktop)");
     }
 
     public String getBootstrapData() {
@@ -97,6 +99,7 @@ public class JavaBridge {
             settings.selectedVersionId = versionId;
         }
         configManager.save();
+        LauncherLog.info("Версия инстанса " + instance.name + " → " + versionId);
         runJs("onVersionSelected(" + jsQuote(versionId) + ")");
         refreshInstances();
     }
@@ -141,11 +144,15 @@ public class JavaBridge {
     public void play() {
         LauncherSettings settings = configManager.getSettings();
         InstanceInfo instance = instanceManager.get(settings.selectedInstanceId);
-        GameVersion version = service.findVersion(service.resolveVersionId(instance));
+        String versionId = service.resolveVersionId(instance);
+        GameVersion version = service.findVersion(versionId);
         if (version == null) {
+            LauncherLog.error("Версия не найдена: " + versionId);
             status.accept("Версия не выбрана");
             return;
         }
+
+        LauncherLog.info("Играть: инстанс=" + instance.name + ", версия=" + version.name + " (" + version.id + ")");
 
         Task<Void> task = new Task<>() {
             @Override
@@ -191,6 +198,7 @@ public class JavaBridge {
                 runJs("setDownloadProgress(-1, '')");
                 Throwable error = getException();
                 String message = error != null && error.getMessage() != null ? error.getMessage() : "Ошибка запуска";
+                LauncherLog.error("Ошибка запуска", error);
                 status.accept(message);
                 runJs("showToast(" + jsQuote(message) + ")");
             }
@@ -204,7 +212,10 @@ public class JavaBridge {
 
     public void downloadVersion(String id) {
         GameVersion version = findVersion(id);
-        if (version == null) return;
+        if (version == null) {
+            LauncherLog.error("Версия не найдена для загрузки: " + id);
+            return;
+        }
 
         setInstanceVersion(configManager.getSettings().selectedInstanceId, id);
 
@@ -227,6 +238,7 @@ public class JavaBridge {
             protected void failed() {
                 runJs("setDownloadProgress(-1, '')");
                 Throwable error = getException();
+                LauncherLog.error("Ошибка загрузки версии", error);
                 runJs("showToast(" + jsQuote(error != null ? error.getMessage() : "Ошибка загрузки") + ")");
             }
         };
@@ -376,6 +388,19 @@ public class JavaBridge {
         } catch (Exception ignored) {}
 
         installMod(repo, hasJava, instanceId);
+    }
+
+    public void logs() {
+        runJs("openPanel('logs')");
+    }
+
+    public String getLogs() {
+        return LauncherLog.dump();
+    }
+
+    public void clearLogs() {
+        LauncherLog.clear();
+        runJs("clearLogView()");
     }
 
     public void exit() {

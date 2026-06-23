@@ -107,9 +107,16 @@ public class LauncherService {
     }
 
     private GameVersion findVersion(List<GameVersion> versions, String id) {
-        if (id == null) return null;
+        if (id == null || id.isBlank()) return null;
         for (GameVersion version : versions) {
-            if (version.id.equals(id)) return version;
+            if (id.equals(version.id)) return version;
+        }
+        String norm = GameVersionUtil.normalizeTag(id);
+        for (GameVersion version : versions) {
+            if (norm.equals(GameVersionUtil.normalizeTag(version.id))
+                    || norm.equals(GameVersionUtil.normalizeTag(version.name))) {
+                return version;
+            }
         }
         return null;
     }
